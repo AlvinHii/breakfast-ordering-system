@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>北寧路早餐店｜老闆後台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>北寧路早餐店｜老闆後台</h1>
+  <nav id="nav" class="hidden">
+    <button data-tab="orders" class="on">訂單</button>
+    <button data-tab="menu">餐點</button>
+    <button data-tab="combos">套餐</button>
+    <button data-tab="stats">銷售統計</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+  <div class="userbox" id="userbox"></div>
+</header>
+
+<div class="wrap">
+  <!-- 登入 -->
+  <form id="loginBox" class="panel hidden" style="max-width:360px;margin:40px auto">
+    <h2>老闆登入</h2>
+    <label>帳號</label><input name="username" autocomplete="username" required>
+    <label>密碼</label><input name="password" type="password" autocomplete="current-password" required>
+    <div class="err hidden" id="loginErr"></div>
+    <button style="width:100%;margin-top:14px">登入</button>
+    <p class="muted">示範帳號：boss / boss1234（正式使用請設定 BOSS_PASSWORD）</p>
+  </form>
+
+  <!-- 訂單 -->
+  <section id="tab-orders" class="hidden">
+    <div class="spread" style="margin-bottom:12px">
+      <div class="muted" id="shopState"></div>
+      <label class="inline"><input type="checkbox" id="quickAccept"> 接受新訂單</label>
+    </div>
+    <div class="cols">
+      <div class="col"><h3>待接單 <span class="count" id="cPending">0</span></h3><div id="lPending"></div></div>
+      <div class="col"><h3>製作清單 <span class="count" id="cMaking">0</span></h3><div id="lMaking"></div></div>
+      <div class="col"><h3>待取餐 <span class="count" id="cReady">0</span></h3><div id="lReady"></div></div>
+    </div>
+    <h3 style="margin:24px 0 10px">今日已結束</h3>
+    <div id="lDone"></div>
+  </section>
+
+  <!-- 餐點 -->
+  <section id="tab-menu" class="hidden">
+    <div class="spread" style="margin-bottom:12px"><h2>餐點管理</h2><button onclick="editItem()">＋ 上架新餐點</button></div>
+    <div id="menuTable"></div>
+  </section>
+
+  <!-- 套餐 -->
+  <section id="tab-combos" class="hidden">
+    <div class="spread" style="margin-bottom:12px"><h2>套餐管理</h2><button onclick="editCombo()">＋ 新增套餐</button></div>
+    <div id="comboTable"></div>
+  </section>
+
+  <!-- 統計 -->
+  <section id="tab-stats" class="hidden">
+    <div class="spread" style="margin-bottom:12px"><h2>銷售統計</h2>
+      <div class="tabs" id="rangeTabs" style="margin:0"><button data-range="today" class="on">今日</button><button data-range="month">本月</button><button data-range="all">全部</button></div>
+    </div>
+    <div id="stats"></div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="tab-settings" class="hidden">
+    <form class="panel" id="setForm" style="max-width:460px">
+      <h2>營業設定</h2>
+      <div class="row"><div style="flex:1"><label>開始接單</label><input type="time" name="open" required></div><div style="flex:1"><label>打烊</label><input type="time" name="close" required></div></div>
+      <p class="muted">顧客只能在營業時間內點餐；取餐時間需在下單後 15 分鐘以上、打烊前。</p>
+      <label class="inline"><input type="checkbox" name="accepting"> 接受新訂單（臨時休息可關閉）</label>
+      <label>會員點數：每消費多少元得 1 點</label><input type="number" name="pointRate" min="1" max="1000" required>
+      <button style="margin-top:14px">儲存</button>
+    </form>
+  </section>
+</div>
+
+<!-- 餐點編輯 -->
+<dialog id="dlgItem">
+  <form id="itemForm">
+    <div class="dbody">
+      <h2 id="itemTitle">上架餐點</h2>
+      <label>餐點名稱</label><input name="name" maxlength="30" required>
+      <div class="row"><div style="flex:1"><label>單價（元）</label><input name="price" type="number" min="1" max="9999" required></div>
+        <div style="flex:1"><label>分類</label><input name="category" list="catList" maxlength="20" required><datalist id="catList"></datalist></div></div>
+      <label>說明</label><textarea name="desc" maxlength="200"></textarea>
+      <label>客製選項群組（例如：冰塊、甜度、加料；沒有就不用新增）</label>
+      <div id="groupList"></div>
+      <button type="button" class="ghost" style="margin-top:6px" onclick="addGroupRow()">＋ 新增選項群組</button>
+      <p class="muted" style="margin:6px 0 0">選項用逗號分隔，要加價就在後面寫「+金額」，例如：<code>加蛋+10, 加起司+10</code></p>
+      <label>照片</label><input type="file" accept="image/*" data-photo>
+      <input type="hidden" name="photo"><img class="preview hidden" data-preview alt="">
+      <label class="inline"><input type="checkbox" name="available" checked> 上架中（取消勾選即下架）</label>
+      <div class="err hidden" data-err></div>
+    </div>
+    <div class="dfoot"><button type="button" class="ghost" onclick="dlgItem.close()">取消</button><button>儲存</button></div>
+  </form>
+</dialog>
+
+<!-- 套餐編輯 -->
+<dialog id="dlgCombo">
+  <form id="comboForm">
+    <div class="dbody">
+      <h2 id="comboTitle">新增套餐</h2>
+      <label>套餐名稱</label><input name="name" maxlength="30" required>
+      <label>套餐價格（元）</label><input name="price" type="number" min="1" max="9999" required>
+      <p class="muted" id="comboOrig"></p>
+      <label>餐點組合（填數量，0 表示不包含）</label><div class="combo-items" id="comboItems"></div>
+      <label>說明</label><textarea name="desc" maxlength="200"></textarea>
+      <label>照片</label><input type="file" accept="image/*" data-photo>
+      <input type="hidden" name="photo"><img class="preview hidden" data-preview alt="">
+      <label class="inline"><input type="checkbox" name="available" checked> 上架中</label>
+      <div class="err hidden" data-err></div>
+    </div>
+    <div class="dfoot"><button type="button" class="ghost" onclick="dlgCombo.close()">取消</button><button>儲存</button></div>
+  </form>
+</dialog>
+
+<script src="/common.js"></script>
+<script>
+let me = null, orders = [], menu = [], combos = [], settings = null, editingId = null, range = 'today', es = null;
+
+async function init() {
+  me = await api('/api/me');
+  if (!me || me.role !== 'boss') {
+    $('#loginBox').classList.remove('hidden');
+    if (me) { $('#loginErr').textContent = `目前登入的是顧客「${me.name}」，請改用老闆帳號`; $('#loginErr').classList.remove('hidden'); }
+    return;
+  }
+  $('#loginBox').classList.add('hidden');
+  $('#nav').classList.remove('hidden');
+  $('#userbox').innerHTML = `<span>${esc(me.name)}</span><a href="/" style="color:#fff">顧客頁</a><button id="btnLogout">登出</button>`;
+  $('#btnLogout').onclick = async () => { await api('/api/logout', { method: 'POST', body: {} }); location.reload(); };
+  askNotifyPermission();
+  await Promise.all([loadOrders(), loadMenu(), loadSettings()]);
+  show('orders');
+  es = connectEvents({
+    order: (o) => {
+      const i = orders.findIndex((x) => x.id === o.id);
+      const isNew = i < 0;
+      if (isNew) orders.push(o); else orders[i] = o;
+      renderOrders(isNew && o.status === '待接單' ? o.id : null);
+      if (isNew && o.status === '待接單') {
+        notify('新訂單！', `${o.customerName}・${o.pickupTime} 取餐・${money(o.total)}`, '');
+        document.title = '（新訂單）北寧路早餐店｜老闆後台';
+        setTimeout(() => (document.title = '北寧路早餐店｜老闆後台'), 6000);
+      }
+    },
+    menu: () => { loadMenu(); loadSettings(); },
+  });
+}
+
+$('#loginBox').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const u = await api('/api/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+    if (u.role !== 'boss') throw new Error('這不是老闆帳號');
+    location.reload();
+  } catch (err) { $('#loginErr').textContent = err.message; $('#loginErr').classList.remove('hidden'); }
+};
+
+function show(t) {
+  $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  ['orders', 'menu', 'combos', 'stats', 'settings'].forEach((x) => $('#tab-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'stats') loadStats();
+}
+$$('#nav button').forEach((b) => (b.onclick = () => show(b.dataset.tab)));
+
+// ─────────── 訂單 ───────────
+async function loadOrders() { orders = await api('/api/boss/orders'); renderOrders(); }
+const nowMin = () => { const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date()).split(':').map(Number); return h * 60 + m; };
+// 待接單的訂單快到取餐時間時提醒老闆（時間到了系統會自動取消）
+function urgency(o) {
+  if (o.status !== '待接單' || o.date !== todayStr()) return '';
+  const [h, m] = o.pickupTime.split(':').map(Number);
+  const left = h * 60 + m - nowMin();
+  return left <= 10 ? `<div class="urgent">距離取餐只剩 ${Math.max(0, left)} 分鐘，再不接單會自動取消</div>` : '';
+}
+function orderCard(o, flashId) {
+  let actions = '';
+  if (o.status === '待接單') actions = `<button class="ok" onclick="act(${o.id},'accept')">接受</button><button class="danger" onclick="reject(${o.id})">拒絕</button>`;
+  else if (o.status === '已接單') actions = `<button onclick="setSt(${o.id},'製作完成')">製作完成</button>`;
+  else if (o.status === '製作完成') actions = `<button class="ok" onclick="setSt(${o.id},'已取餐')">已取餐</button>`;
+  const cancellable = !['已拒絕', '已取消'].includes(o.status);
+  return `<div class="order ${o.id === flashId ? 'flash' : ''}">
+    <div class="spread">
+      <div>${o.number ? `<div class="num">${esc(o.number)}</div>` : `<b>訂單 #${o.id}</b>`}<div class="muted">${esc(o.customerName)}・下單 ${timeOf(o.createdAt)}</div></div>
+      <div style="text-align:right"><div style="font-size:1.2rem;font-weight:800">${esc(o.pickupTime)}</div><div class="muted">取餐${o.date !== todayStr() ? `（${esc(o.date)}）` : ''}</div></div>
+    </div>
+    <div style="margin:8px 0;font-size:1.02rem">${o.items.map(lineText).join('<br>')}</div>
+    <div class="spread"><b>合計 ${money(o.total)}</b><span class="muted">${o.pointsUsed ? `點數折抵 ${o.pointsUsed}` : ''}</span></div>
+    ${urgency(o)}
+    ${o.status === '已拒絕' ? `<div class="muted">拒絕原因：${esc(o.rejectReason)}</div>` : ''}
+    ${o.status === '已取消' && o.cancelReason ? `<div class="muted">${esc(o.cancelReason)}</div>` : ''}
+    <div class="row" style="margin-top:8px;justify-content:flex-end">${['已取餐', '已拒絕', '已取消'].includes(o.status) ? statusTag(o.status) : ''}
+      ${cancellable && o.status !== '待接單' ? `<button class="link" onclick="cancelOrder(${o.id})">取消訂單</button>` : ''}${actions}</div>
+  </div>`;
+}
+const todayStr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+function renderOrders(flashId = null) {
+  const by = (s) => orders.filter((o) => o.status === s);
+  const byPick = (a, b) => a.pickupTime.localeCompare(b.pickupTime) || a.id - b.id;
+  const fill = (id, cnt, list, empty) => { $(cnt).textContent = list.length; $(id).innerHTML = list.length ? list.map((o) => orderCard(o, flashId)).join('') : `<div class="empty">${empty}</div>`; };
+  fill('#lPending', '#cPending', by('待接單').sort((a, b) => a.id - b.id), '沒有待接的訂單');
+  fill('#lMaking', '#cMaking', by('已接單').sort(byPick), '製作清單是空的');
+  fill('#lReady', '#cReady', by('製作完成').sort(byPick), '沒有待取的餐點');
+  const done = orders.filter((o) => ['已取餐', '已拒絕', '已取消'].includes(o.status)).sort((a, b) => b.id - a.id);
+  $('#lDone').innerHTML = done.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${done.map((o) => orderCard(o)).join('')}</div>` : '<div class="empty">尚無</div>';
+}
+async function act(id, a, body = {}) {
+  try { const o = await api(`/api/boss/orders/${id}/${a}`, { method: 'POST', body }); upsert(o); } catch (e) { toast(e.message, 'bad'); loadOrders(); }
+}
+const setSt = (id, status) => act(id, 'status', { status });
+function reject(id) { const reason = prompt('拒絕原因（會顯示給顧客）', '餐點售完'); if (reason !== null) act(id, 'reject', { reason }); }
+function cancelOrder(id) { if (confirm('確定取消這筆訂單？會退回顧客使用的點數，並扣回這筆訂單得到的點數。')) act(id, 'cancel'); }
+setInterval(() => { if (me && me.role === 'boss') renderOrders(); }, 30000);   // 更新「剩幾分鐘」
+function upsert(o) { const i = orders.findIndex((x) => x.id === o.id); if (i < 0) orders.push(o); else orders[i] = o; renderOrders(); }
+
+// ─────────── 照片（先在瀏覽器縮圖，再上傳） ───────────
+function shrink(file, max = 900) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => reject(new Error('無法讀取這張圖片'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+function bindPhoto(form) {
+  $('[data-photo]', form).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const { url } = await api('/api/boss/upload', { method: 'POST', body: { dataUrl: await shrink(f) } });
+      form.photo.value = url; showPreview(form, url);
+    } catch (err) { formErr(form, err.message); }
+  };
+}
+function showPreview(form, url) { const p = $('[data-preview]', form); p.src = url || ''; p.classList.toggle('hidden', !url); }
+function formErr(form, msg) { const e = $('[data-err]', form); e.textContent = msg; e.classList.toggle('hidden', !msg); }
+bindPhoto($('#itemForm')); bindPhoto($('#comboForm'));
+
+// ─────────── 餐點 ───────────
+async function loadMenu() { ({ menu, combos } = await api('/api/boss/menu')); renderMenuTable(); renderComboTable(); }
+const TYPE_LABEL = { one: '單選（必選）', maybe: '單選（可不選）', many: '複選' };
+const choiceText = (g) => g.choices.map((c) => (c.price ? `${c.label}+${c.price}` : c.label)).join(', ');
+const groupsSummary = (groups) => (groups || []).map((g) => `<div><b>${esc(g.name)}</b>：${esc(choiceText(g))}</div>`).join('') || '-';
+function renderMenuTable() {
+  $('#menuTable').innerHTML = `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>分類</th><th>單價</th><th>客製選項</th><th>狀態</th><th></th></tr>
+    ${menu.map((m) => `<tr><td class="c-ph">${thumb(m.photo, m.name)}</td><td class="c-main"><b>${esc(m.name)}</b><div class="muted">${esc(m.desc)}</div></td><td data-label="分類">${esc(m.category)}</td><td data-label="單價">${money(m.price)}</td>
+      <td data-label="客製選項" class="muted">${groupsSummary(m.groups)}</td><td data-label="狀態">${m.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
+      <td class="c-act"><button class="ghost" onclick="editItem(${m.id})">編輯</button> <button class="link" onclick="delItem(${m.id})">刪除</button></td></tr>`).join('')}</table>`;
+  $('#catList').innerHTML = [...new Set(menu.map((m) => m.category))].map((c) => `<option value="${esc(c)}">`).join('');
+}
+function editItem(id) {
+  const f = $('#itemForm'); const m = menu.find((x) => x.id === id);
+  editingId = id || null; f.reset(); formErr(f, '');
+  $('#itemTitle').textContent = m ? '編輯餐點' : '上架新餐點';
+  f.name.value = m?.name || ''; f.price.value = m?.price || ''; f.category.value = m?.category || '';
+  f.desc.value = m?.desc || ''; f.photo.value = m?.photo || '';
+  f.available.checked = m ? m.available : true; showPreview(f, m?.photo);
+  $('#groupList').innerHTML = '';
+  (m?.groups || []).forEach(addGroupRow);
+  $('#dlgItem').showModal();
+}
+function addGroupRow(g) {
+  const div = document.createElement('div');
+  div.className = 'grp-row';
+  div.innerHTML = `<div class="row"><input class="g-name" placeholder="群組名稱，例如：冰塊" maxlength="10" value="${esc(g?.name || '')}">
+      <select class="g-type">${Object.entries(TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${(g?.type || 'one') === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <button type="button" class="link" onclick="this.closest('.grp-row').remove()">移除</button></div>
+    <input class="g-choices" placeholder="例如：正常冰, 少冰, 去冰  或  加蛋+10, 加起司+10" value="${esc(g ? choiceText(g) : '')}">`;
+  $('#groupList').appendChild(div);
+  if (!g) $('.g-name', div).focus();
+}
+function readGroupRows() {
+  return $$('#groupList .grp-row').map((row) => ({
+    name: $('.g-name', row).value.trim(),
+    type: $('.g-type', row).value,
+    choices: $('.g-choices', row).value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean).map((s) => {
+      const m = /^(.*?)\s*\+\s*(\d+)\s*$/.exec(s);
+      return m ? { label: m[1], price: Number(m[2]) } : { label: s, price: 0 };
+    }),
+  })).filter((g) => g.name || g.choices.length);
+}
+$('#itemForm').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target;
+  const body = { name: f.name.value, price: Number(f.price.value), category: f.category.value, desc: f.desc.value,
+    groups: readGroupRows(), photo: f.photo.value, available: f.available.checked };
+  try {
+    await api(editingId ? `/api/boss/menu/${editingId}` : '/api/boss/menu', { method: editingId ? 'PUT' : 'POST', body });
+    $('#dlgItem').close(); toast('已儲存', 'ok'); loadMenu();
+  } catch (err) { formErr(f, err.message); }
+};
+async function delItem(id) {
+  if (!confirm('確定刪除這道餐點？（只想暫時不賣，可以改成下架）')) return;
+  try { await api(`/api/boss/menu/${id}`, { method: 'DELETE' }); toast('已刪除'); loadMenu(); } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ─────────── 套餐 ───────────
+const comboText = (c) => c.items.map((i) => `${(menu.find((m) => m.id === i.ref) || {}).name || '?'} x ${i.qty}`).join('、');
+const comboOrig = (items) => items.reduce((s, i) => s + ((menu.find((m) => m.id === i.ref) || {}).price || 0) * i.qty, 0);
+function renderComboTable() {
+  $('#comboTable').innerHTML = combos.length ? `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>內容</th><th>價格</th><th>狀態</th><th></th></tr>
+    ${combos.map((c) => `<tr><td class="c-ph">${thumb(c.photo, c.name)}</td><td class="c-main"><b>${esc(c.name)}</b><div class="muted">${esc(c.desc)}</div></td><td data-label="內容">${esc(comboText(c))}</td>
+      <td data-label="價格">${money(c.price)} <span class="muted">（原價 ${money(comboOrig(c.items))}）</span></td>
+      <td data-label="狀態">${c.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
+      <td class="c-act"><button class="ghost" onclick="editCombo(${c.id})">編輯</button> <button class="link" onclick="delCombo(${c.id})">刪除</button></td></tr>`).join('')}</table>`
+    : '<div class="empty">還沒有套餐</div>';
+}
+function editCombo(id) {
+  const f = $('#comboForm'); const c = combos.find((x) => x.id === id);
+  editingId = id || null; f.reset(); formErr(f, '');
+  $('#comboTitle').textContent = c ? '編輯套餐' : '新增套餐';
+  f.name.value = c?.name || ''; f.price.value = c?.price || ''; f.desc.value = c?.desc || ''; f.photo.value = c?.photo || '';
+  f.available.checked = c ? c.available : true; showPreview(f, c?.photo);
+  $('#comboItems').innerHTML = menu.map((m) => `<span>${esc(m.name)} <span class="muted">${money(m.price)}</span></span>
+    <input type="number" min="0" max="10" value="${(c?.items.find((i) => i.ref === m.id) || {}).qty || 0}" data-ref="${m.id}" oninput="updOrig()">`).join('');
+  updOrig();
+  $('#dlgCombo').showModal();
+}
+const comboPicked = () => $$('#comboItems input').map((i) => ({ ref: Number(i.dataset.ref), qty: Number(i.value) })).filter((i) => i.qty > 0);
+function updOrig() { $('#comboOrig').textContent = `單點合計 ${money(comboOrig(comboPicked()))}`; }
+$('#comboForm').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target;
+  const body = { name: f.name.value, price: Number(f.price.value), desc: f.desc.value, items: comboPicked(), photo: f.photo.value, available: f.available.checked };
+  try {
+    await api(editingId ? `/api/boss/combos/${editingId}` : '/api/boss/combos', { method: editingId ? 'PUT' : 'POST', body });
+    $('#dlgCombo').close(); toast('已儲存', 'ok'); loadMenu();
+  } catch (err) { formErr(f, err.message); }
+};
+async function delCombo(id) {
+  if (!confirm('確定刪除這個套餐？')) return;
+  try { await api(`/api/boss/combos/${id}`, { method: 'DELETE' }); toast('已刪除'); loadMenu(); } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ─────────── 統計 ───────────
+$$('#rangeTabs button').forEach((b) => (b.onclick = () => { range = b.dataset.range; $$('#rangeTabs button').forEach((x) => x.classList.toggle('on', x === b)); loadStats(); }));
+async function loadStats() {
+  const s = await api('/api/boss/stats?range=' + range);
+  const maxQty = Math.max(1, ...s.items.map((i) => i.qty));
+  const cats = [...new Set(s.items.map((i) => i.category))];
+  $('#stats').innerHTML = `
+    <div class="tiles">
+      <div class="tile"><span class="muted">有效訂單</span><b>${s.orders}</b></div>
+      <div class="tile"><span class="muted">營業額</span><b>${money(s.revenue)}</b></div>
+      <div class="tile"><span class="muted">平均客單價</span><b>${money(s.avgOrder)}</b></div>
+      <div class="tile"><span class="muted">點數折抵</span><b>${s.pointsUsed}</b></div>
+    </div>
+    <p class="muted">訂單狀態：${Object.entries(s.statusCounts).map(([k, v]) => `${esc(k)} ${v}`).join('　') || '無'}（有效訂單＝已接單、製作完成、已取餐）</p>
+    <div class="panel" style="margin-bottom:16px"><h3 style="margin-bottom:8px">各餐點銷售排行</h3>
+      ${s.items.length ? cats.map((c) => `<div class="cat" style="margin:12px 0 4px">${esc(c)}</div>${s.items.filter((i) => i.category === c).map((i, k) => `
+        <div class="hbar"><span>${k + 1}. ${esc(i.name)}</span><div class="bar"><i style="width:${(i.qty / maxQty) * 100}%"></i></div><span>${i.qty} 份｜${money(i.revenue)}</span></div>`).join('')}`).join('')
+      : '<div class="empty">這段期間還沒有銷售</div>'}
+    </div>
+    <div class="panel"><h3 style="margin-bottom:8px">餐點評價（全部期間）</h3>
+      ${s.ratings.length ? `<div class="hscroll"><table><tr><th>餐點</th><th>平均</th><th>則數</th>${[5, 4, 3, 2, 1, 0].map((n) => `<th>${n}★</th>`).join('')}</tr>
+        ${s.ratings.map((r) => `<tr><td>${esc(r.name)}</td><td><span class="stars">★</span> ${r.avg.toFixed(1)}</td><td>${r.count}</td>${[5, 4, 3, 2, 1, 0].map((n) => `<td>${r.dist[n]}</td>`).join('')}</tr>`).join('')}</table></div>`
+      : '<div class="empty">還沒有評價</div>'}
+    </div>`;
+}
+
+// ─────────── 設定 ───────────
+async function loadSettings() {
+  settings = await api('/api/boss/settings');
+  const f = $('#setForm');
+  f.open.value = settings.open; f.close.value = settings.close; f.accepting.checked = settings.accepting; f.pointRate.value = settings.pointRate;
+  $('#quickAccept').checked = settings.accepting;
+  $('#shopState').textContent = `營業時間 ${settings.open}–${settings.close}${settings.accepting ? '' : '｜目前暫停接單'}`;
+}
+async function saveSettings(patch) {
+  try { await api('/api/boss/settings', { method: 'PUT', body: { ...settings, ...patch } }); toast('設定已儲存', 'ok'); loadSettings(); }
+  catch (e) { toast(e.message, 'bad'); loadSettings(); }
+}
+$('#setForm').onsubmit = (e) => { e.preventDefault(); const f = e.target; saveSettings({ open: f.open.value, close: f.close.value, accepting: f.accepting.checked, pointRate: Number(f.pointRate.value) }); };
+$('#quickAccept').onchange = (e) => saveSettings({ accepting: e.target.checked });
+
+init();
+</script>
+</body>
+</html>

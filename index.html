@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>北寧路早餐店｜線上點餐</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>北寧路早餐店</h1>
+  <nav>
+    <button data-view="menu" class="on">菜單</button>
+    <button data-view="orders">我的訂單</button>
+  </nav>
+  <div class="userbox" id="userbox"></div>
+</header>
+
+<div class="banner" id="banner">載入中…</div>
+
+<div class="wrap">
+  <div id="view-menu" class="layout">
+    <section id="menu"></section>
+    <aside><div class="panel" id="cart"></div></aside>
+  </div>
+  <div id="view-orders" class="hidden">
+    <div id="orders"></div>
+  </div>
+</div>
+
+<button id="cartBar" onclick="document.getElementById('cart').scrollIntoView({behavior:'smooth'})"></button>
+
+<!-- 餐點資訊 -->
+<dialog id="dlgItem"><div class="dbody" id="itemBody"></div><div class="dfoot" id="itemFoot"></div></dialog>
+
+<!-- 確認訂單 -->
+<dialog id="dlgConfirm">
+  <div class="dbody"><h2>請確認訂單</h2><div id="confirmBody"></div></div>
+  <div class="dfoot"><button class="ghost" id="cBack">返回修改</button><button id="cOk">確認送出</button></div>
+</dialog>
+
+<!-- 登入 / 註冊 -->
+<dialog id="dlgLogin">
+  <form class="dbody" id="loginForm">
+    <div class="tabs"><button type="button" data-mode="login" class="on">登入</button><button type="button" data-mode="register">註冊</button></div>
+    <label>帳號</label><input name="username" autocomplete="username" required>
+    <div id="nameField" class="hidden"><label>暱稱（會顯示在訂單上）</label><input name="name" maxlength="20"></div>
+    <label>密碼</label><input name="password" type="password" autocomplete="current-password" required>
+    <div class="err hidden" id="loginErr"></div>
+    <div class="row" style="margin-top:14px"><button type="submit" style="flex:1" id="loginBtn">登入</button><button type="button" class="ghost" id="loginCancel">取消</button></div>
+    <div class="muted" style="margin-top:12px;text-align:center">或使用第三方帳號登入</div>
+    <div class="oauth" id="oauth"></div>
+    <p class="muted">示範帳號：demo / demo1234</p>
+  </form>
+</dialog>
+
+<!-- 評價 -->
+<dialog id="dlgRate">
+  <div class="dbody"><h2>評價這筆訂單</h2><p class="muted">0–5 顆星，評論可不填。</p><div id="rateBody"></div><div class="err hidden" id="rateErr"></div></div>
+  <div class="dfoot"><button class="ghost" id="rBack">取消</button><button id="rOk">送出評價</button></div>
+</dialog>
+
+<script src="/common.js"></script>
+<script>
+let me = null, data = null, cart = [], myOrders = [], es = null, loginMode = 'login', rateOrder = null;
+
+// ─────────── 初始化 ───────────
+async function init() {
+  me = await api('/api/me');
+  await loadMenu();
+  renderUser();
+  renderCart();
+  if (me) afterLogin(false);
+  loadProviders();
+}
+async function loadMenu() {
+  data = await api('/api/menu');
+  renderBanner();
+  renderMenu();
+}
+const findMenu = (id) => data.menu.find((m) => m.id === id);
+const findCombo = (id) => data.combos.find((c) => c.id === id);
+const lineInfo = (c) => (c.type === 'combo' ? findCombo(c.ref) : findMenu(c.ref));
+// 購物車一行的單價（含加價）與選項文字
+function lineCalc(c) {
+  const x = lineInfo(c);
+  if (c.type !== 'combo') { const r = calcChoices(x.groups, c.choices); return { name: x.name, unit: x.price + r.extra, note: r.note }; }
+  let extra = 0; const notes = [];
+  x.contents.forEach((ci, k) => { const r = calcChoices(ci.groups, (c.parts || [])[k]); extra += r.extra * ci.qty; if (r.note) notes.push(`${ci.name}：${r.note}`); });
+  return { name: x.name, unit: x.price + extra, note: notes.join('；') };
+}
+
+function renderBanner() {
+  const s = data.shop, b = $('#banner');
+  b.className = 'banner' + (s.canOrder ? '' : ' closed');
+  b.textContent = s.canOrder
+    ? `營業中 ${s.open}–${s.close}｜最早可預約 ${s.earliestPickup} 取餐（下單後至少 ${s.minLead} 分鐘）`
+    : `${s.reason}｜營業時間 ${s.open}–${s.close}`;
+}
+
+function renderUser() {
+  const box = $('#userbox');
+  if (!me) { box.innerHTML = `<button id="btnLogin">登入 / 註冊</button>`; $('#btnLogin').onclick = () => openLogin(); return; }
+  box.innerHTML = `<span>${esc(me.name)}</span>`
+    + (me.role === 'customer' ? `<span class="pts">點數 ${me.points}</span>` : `<a href="/boss" style="color:#fff">前往老闆後台</a>`)
+    + `<button id="btnLogout">登出</button>`;
+  $('#btnLogout').onclick = async () => { await api('/api/logout', { method: 'POST', body: {} }); location.reload(); };
+}
+
+// ─────────── 菜單 ───────────
+function ratingLine(ref) {
+  const r = data.ratings[ref];
+  return r ? `<span class="stars">★</span> ${r.avg.toFixed(1)} <span class="muted">(${r.count})</span>` : `<span class="muted">尚無評價</span>`;
+}
+function card(type, x) {
+  const ref = `${type}:${x.id}`;
+  const hot = data.popular.includes(ref);
+  return `<div class="card" onclick="openItem('${type}',${x.id})">
+    ${hot ? '<span class="badge">本月熱門</span>' : ''}
+    ${thumb(x.photo, x.name)}
+    <div class="body">
+      <div class="spread"><span class="name">${esc(x.name)}</span><span class="price">${money(x.price)}</span></div>
+      <div class="muted">${type === 'combo' ? esc(x.contents.map((i) => `${i.name}x${i.qty}`).join('＋')) : esc(x.desc)}</div>
+      <div style="margin-top:4px;font-size:.88rem">${ratingLine(ref)}</div>
+    </div></div>`;
+}
+function renderMenu() {
+  const cats = [...new Set(data.menu.map((m) => m.category))];
+  $('#menu').innerHTML =
+    (data.combos.length ? `<div class="cat">套餐</div><div class="grid">${data.combos.map((c) => card('combo', c)).join('')}</div>` : '')
+    + cats.map((c) => `<div class="cat">${esc(c)}</div><div class="grid">${data.menu.filter((m) => m.category === c).map((m) => card('item', m)).join('')}</div>`).join('')
+    || '<div class="empty">目前沒有上架的餐點</div>';
+}
+
+let dlgQty = 1, dlgCtx = null;
+// 選項晶片：單選必選用 radio；可不選與複選用 checkbox（可不選時一次只留一個）
+function groupsHtml(groups, scope) {
+  return (groups || []).map((g, gi) => `
+    <div class="opt-group" data-scope="${scope}" data-group="${esc(g.name)}" data-type="${g.type}">
+      <div class="opt-head">${esc(g.name)} <span class="muted">${GROUP_HINT[g.type]}</span></div>
+      <div class="chips">${g.choices.map((c, ci) => `<label class="chip"><input type="${g.type === 'one' ? 'radio' : 'checkbox'}" name="${scope}-${gi}" value="${esc(c.label)}" ${g.type === 'one' && ci === 0 ? 'checked' : ''}><span>${esc(c.label)}${c.price ? ` <b>+${c.price}</b>` : ''}</span></label>`).join('')}</div>
+    </div>`).join('');
+}
+function readPicks(scope) {
+  const out = {};
+  $$(`#itemBody .opt-group[data-scope="${scope}"]`).forEach((g) => {
+    const v = $$('input:checked', g).map((i) => i.value);
+    if (v.length) out[g.dataset.group] = v;
+  });
+  return out;
+}
+function dlgLine() {
+  const { type, id, x } = dlgCtx;
+  return type === 'combo' ? { type, ref: id, parts: x.contents.map((_, k) => readPicks('p' + k)) } : { type, ref: id, choices: readPicks('i') };
+}
+function updDlgPrice() {
+  const btn = $('#addBtn'); if (!btn) return;
+  btn.textContent = `加入訂單 ${money(lineCalc(dlgLine()).unit * dlgQty)}`;
+}
+async function openItem(type, id) {
+  const x = type === 'combo' ? findCombo(id) : findMenu(id);
+  const ref = `${type}:${id}`;
+  const r = data.ratings[ref];
+  dlgQty = 1; dlgCtx = { type, id, x };
+  const optHtml = type === 'combo'
+    ? x.contents.map((ci, k) => (ci.groups.length ? `<div class="opt-part"><div class="opt-part-name">${esc(ci.name)}${ci.qty > 1 ? ` x ${ci.qty}` : ''}</div>${groupsHtml(ci.groups, 'p' + k)}</div>` : '')).join('')
+    : groupsHtml(x.groups, 'i');
+  $('#itemBody').innerHTML = `
+    ${x.photo ? `<img class="hero" src="${esc(x.photo)}" alt="${esc(x.name)}">` : ''}
+    <div class="spread" style="margin-top:10px"><h2>${esc(x.name)}</h2><b class="price" style="color:var(--accent);font-size:1.2rem">${money(x.price)}</b></div>
+    <p>${esc(x.desc) || '<span class="muted">沒有說明</span>'}</p>
+    ${type === 'combo' ? `<p class="muted">內容：${esc(x.contents.map((i) => `${i.name} x ${i.qty}`).join('、'))}</p>` : ''}
+    ${optHtml}
+    <label>數量</label>
+    <div class="qty"><button class="ghost" onclick="stepQty(-1)">−</button><b id="dq">1</b><button class="ghost" onclick="stepQty(1)">＋</button></div>
+    <h3 style="margin-top:18px">顧客評價</h3>
+    ${r ? `<div class="row" style="gap:14px;margin:8px 0"><div style="font-size:2rem;font-weight:800">${r.avg.toFixed(1)}</div><div><div class="stars">${starText(r.avg)}</div><div class="muted">${r.count} 則評價</div></div></div>
+      ${[5, 4, 3, 2, 1, 0].map((s) => `<div class="dist"><span>${s} 星</span><div class="bar"><i style="width:${(r.dist[s] / r.count) * 100}%"></i></div><span>${r.dist[s]}</span></div>`).join('')}
+      <div id="comments" style="margin-top:8px"></div>` : '<p class="muted">尚無評價</p>'}`;
+  $('#itemFoot').innerHTML = `<button class="ghost" onclick="dlgItem.close()">關閉</button><button id="addBtn" onclick="addFromDialog()">加入訂單</button>`;
+  $$('#itemBody .opt-group').forEach((g) => g.addEventListener('change', (e) => {
+    if (g.dataset.type === 'maybe' && e.target.checked) $$('input', g).forEach((i) => { if (i !== e.target) i.checked = false; });
+    updDlgPrice();
+  }));
+  updDlgPrice();
+  $('#dlgItem').showModal();
+  if (r) {
+    const list = await api('/api/ratings/' + encodeURIComponent(ref));
+    $('#comments').innerHTML = list.filter((c) => c.comment).slice(0, 8).map((c) => `<div class="comment"><span class="stars">${starText(c.stars)}</span> <span class="muted">${esc(c.name)}</span><div>${esc(c.comment)}</div></div>`).join('');
+  }
+}
+function stepQty(d) { dlgQty = Math.min(20, Math.max(1, dlgQty + d)); $('#dq').textContent = dlgQty; updDlgPrice(); }
+function addFromDialog() {
+  const line = dlgLine();
+  const key = `${line.type}:${line.ref}:${JSON.stringify(line.choices || line.parts)}`;
+  const hit = cart.find((c) => c.key === key);
+  if (hit) hit.qty = Math.min(20, hit.qty + dlgQty); else cart.push({ ...line, key, qty: dlgQty });
+  $('#dlgItem').close();
+  renderCart();
+  toast('已加入訂單');
+}
+
+// ─────────── 購物車 ───────────
+const subtotal = () => cart.reduce((s, c) => s + lineCalc(c).unit * c.qty, 0);
+function pickupSlots() {
+  const s = data.shop;
+  if (!s.canOrder) return [];
+  const [eh, em] = s.earliestPickup.split(':').map(Number), [ch, cm] = s.close.split(':').map(Number);
+  const out = [];
+  for (let m = eh * 60 + em; m <= ch * 60 + cm; m += 5) out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  return out;
+}
+function renderCart() {
+  cart = cart.filter((c) => lineInfo(c));   // 下架的品項自動移除
+  const sub = subtotal();
+  const slots = pickupSlots();
+  const prevPick = $('#pickSel')?.value;
+  const maxPts = me && me.role === 'customer' ? Math.min(me.points, sub) : 0;
+  const prevPts = Math.min(Number($('#ptsIn')?.value || 0), maxPts);
+  $('#cart').innerHTML = `
+    <h2 style="font-size:1.05rem;margin-bottom:6px">我的訂單</h2>
+    ${cart.length ? cart.map((c, i) => { const x = lineCalc(c); return `
+      <div class="line"><div>${esc(x.name)}${x.note ? `<div class="muted">${esc(x.note)}</div>` : ''}<div class="muted">${money(x.unit)}</div></div>
+      <div class="qty"><button class="ghost" onclick="chg(${i},-1)">−</button>${c.qty}<button class="ghost" onclick="chg(${i},1)">＋</button></div></div>`; }).join('')
+    : '<p class="muted">點選餐點加入訂單</p>'}
+    <label>預定取餐時間</label>
+    ${slots.length ? `<select id="pickSel">${slots.map((t) => `<option ${t === prevPick ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<div class="muted">${esc(data.shop.reason)}</div>`}
+    ${maxPts > 0 ? `<label>使用點數折抵（1 點 = 1 元，可用 ${maxPts} 點）</label><input id="ptsIn" type="number" min="0" max="${maxPts}" value="${prevPts}" oninput="renderTotals()">` : ''}
+    <div id="totals"></div>
+    <button style="width:100%" id="btnSubmit" ${cart.length && slots.length ? '' : 'disabled'}>${me ? '送出訂單' : '登入後送出訂單'}</button>
+    <div class="err hidden" id="cartErr"></div>`;
+  $('#btnSubmit').onclick = review;
+  renderTotals();
+  const n = cart.reduce((s, c) => s + c.qty, 0);
+  $('#cartBar').classList.toggle('show', n > 0 && !$('#view-menu').classList.contains('hidden'));
+  $('#cartBar').innerHTML = `<span>查看訂單（${n} 項）</span><span>${money(sub)}</span>`;
+}
+function usedPoints() { const v = Math.floor(Number($('#ptsIn')?.value || 0)); const max = Number($('#ptsIn')?.max || 0); return Math.max(0, Math.min(v, max)); }
+function renderTotals() {
+  const sub = subtotal(), used = usedPoints(), tot = sub - used;
+  $('#totals').innerHTML = `${used ? `<div class="spread muted"><span>點數折抵</span><span>−${money(used)}</span></div>` : ''}
+    <div class="total"><span>合計</span><span>${money(tot)}</span></div>
+    ${me && me.role === 'customer' && tot ? `<p class="muted" style="margin-top:-6px">取餐後可獲得 ${Math.floor(tot / data.shop.pointRate)} 點（每 ${data.shop.pointRate} 元 1 點）</p>` : ''}`;
+}
+function chg(i, d) { cart[i].qty += d; if (cart[i].qty <= 0) cart.splice(i, 1); else cart[i].qty = Math.min(20, cart[i].qty); renderCart(); }
+function cartError(msg) { const e = $('#cartErr'); e.textContent = msg; e.classList.remove('hidden'); }
+
+function review() {
+  if (!me) return openLogin();
+  if (me.role !== 'customer') return cartError('老闆帳號不能點餐，請改用顧客帳號');
+  const used = usedPoints(), sub = subtotal();
+  $('#confirmBody').innerHTML = cart.map((c) => { const x = lineCalc(c); return `<div class="line"><span>${esc(x.name)} x ${c.qty}${x.note ? `<div class="muted">${esc(x.note)}</div>` : ''}</span><span>${money(x.unit * c.qty)}</span></div>`; }).join('')
+    + (used ? `<div class="line"><span>點數折抵</span><span>−${money(used)}</span></div>` : '')
+    + `<div class="total"><span>合計</span><span>${money(sub - used)}</span></div>`
+    + `<p>預定取餐時間：<b>${esc($('#pickSel').value)}</b></p><p class="muted">送出後需等待店家接單，接單後會產生取餐號碼並通知你。</p>`;
+  $('#dlgConfirm').showModal();
+}
+$('#cBack').onclick = () => $('#dlgConfirm').close();
+$('#cOk').onclick = async () => {
+  $('#cOk').disabled = true;
+  askNotifyPermission();
+  try {
+    await api('/api/orders', { method: 'POST', body: { items: cart.map(({ type, ref, choices, parts, qty }) => ({ type, ref, choices, parts, qty })), pickupTime: $('#pickSel').value, usePoints: usedPoints() } });
+    cart = [];
+    $('#dlgConfirm').close();
+    toast('訂購成功！等待店家接單', 'ok');
+    await loadOrders();
+    show('orders');
+    renderCart();
+  } catch (e) {
+    $('#dlgConfirm').close();
+    cartError(e.message);
+    loadMenu().then(renderCart);
+  } finally { $('#cOk').disabled = false; }
+};
+
+// ─────────── 我的訂單 ───────────
+async function loadOrders() { if (me && me.role === 'customer') { myOrders = await api('/api/my/orders'); renderOrders(); } }
+function progress(s) {
+  const steps = ['待接單', '已接單', '製作完成', '已取餐'];
+  const i = steps.indexOf(s);
+  return i < 0 ? '' : `<div class="steps">${steps.map((_, k) => `<span class="${k <= i ? 'on' : ''}"></span>`).join('')}</div><div class="spread muted" style="font-size:.78rem">${steps.map((x) => `<span>${x}</span>`).join('')}</div>`;
+}
+function renderOrders() {
+  const box = $('#orders');
+  if (!me) { box.innerHTML = '<div class="empty">請先登入查看訂單</div>'; return; }
+  if (me.role !== 'customer') { box.innerHTML = '<div class="empty">老闆帳號請到後台查看訂單</div>'; return; }
+  box.innerHTML = myOrders.length ? myOrders.map((o) => `
+    <div class="order" id="o${o.id}">
+      <div class="spread">
+        <div>${o.number ? `<div class="muted">取餐號碼</div><div class="num">${esc(o.number)}</div>` : `<div class="muted">訂單 #${o.id}</div>`}</div>
+        <div style="text-align:right">${statusTag(o.status)}<div class="muted">${esc(o.date)} 取餐 ${esc(o.pickupTime)}</div></div>
+      </div>
+      ${progress(o.status)}
+      <div style="margin-top:8px">${o.items.map(lineText).join('<br>')}</div>
+      <div class="spread" style="margin-top:6px"><b>合計 ${money(o.total)}</b><span class="muted">${o.pointsUsed ? `折抵 ${o.pointsUsed} 點　` : ''}${o.pointsEarned ? `獲得 ${o.pointsEarned} 點` : ''}</span></div>
+      ${o.status === '已拒絕' ? `<div class="err">店家拒絕：${esc(o.rejectReason)}</div>` : ''}
+      ${o.status === '已取消' && o.cancelReason ? `<div class="err">${esc(o.cancelReason)}${o.pointsUsed ? '，使用的點數已退回' : ''}</div>` : ''}
+      <div class="row" style="margin-top:8px;justify-content:flex-end">
+        ${o.status === '待接單' ? `<button class="ghost" onclick="cancelOrder(${o.id})">取消訂單</button>` : ''}
+        ${['製作完成', '已取餐'].includes(o.status) && !o.rated ? `<button onclick="openRate(${o.id})">評價餐點</button>` : ''}
+        ${o.rated ? '<span class="muted">已評價，謝謝！</span>' : ''}
+      </div>
+    </div>`).join('') : '<div class="empty">還沒有訂單</div>';
+}
+async function cancelOrder(id) {
+  if (!confirm('確定要取消這筆訂單嗎？')) return;
+  try { await api(`/api/orders/${id}/cancel`, { method: 'POST', body: {} }); toast('訂單已取消'); loadOrders(); } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ─────────── 評價 ───────────
+let rateVals = {};
+function openRate(id) {
+  rateOrder = myOrders.find((o) => o.id === id);
+  const refs = [...new Map(rateOrder.items.map((l) => [`${l.type}:${l.ref}`, l.name])).entries()];
+  rateVals = Object.fromEntries(refs.map(([r]) => [r, 5]));
+  $('#rateBody').innerHTML = refs.map(([ref, name]) => `
+    <div style="margin:12px 0"><b>${esc(name)}</b>
+      <div class="starpick" data-ref="${esc(ref)}">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-n="${n}">★</button>`).join('')}<button type="button" class="zero" data-n="0">0 星</button></div>
+      <input placeholder="想說的話（選填）" maxlength="200" data-comment="${esc(ref)}"></div>`).join('');
+  $$('.starpick').forEach((p) => p.addEventListener('click', (e) => { const n = e.target.dataset.n; if (n === undefined) return; rateVals[p.dataset.ref] = Number(n); paintStars(); }));
+  paintStars();
+  $('#rateErr').classList.add('hidden');
+  $('#dlgRate').showModal();
+}
+function paintStars() {
+  $$('.starpick').forEach((p) => { const v = rateVals[p.dataset.ref]; $$('button', p).forEach((b) => { const n = Number(b.dataset.n); b.classList.toggle('on', n === 0 ? v === 0 : n <= v); }); });
+}
+$('#rBack').onclick = () => $('#dlgRate').close();
+$('#rOk').onclick = async () => {
+  const ratings = Object.entries(rateVals).map(([ref, stars]) => ({ ref, stars, comment: $(`[data-comment="${CSS.escape(ref)}"]`).value }));
+  try {
+    await api(`/api/orders/${rateOrder.id}/rate`, { method: 'POST', body: { ratings } });
+    $('#dlgRate').close(); toast('感謝你的評價！', 'ok'); loadOrders(); loadMenu();
+  } catch (e) { const el = $('#rateErr'); el.textContent = e.message; el.classList.remove('hidden'); }
+};
+
+// ─────────── 登入 ───────────
+function openLogin() { setMode('login'); $('#loginErr').classList.add('hidden'); $('#dlgLogin').showModal(); }
+function setMode(m) {
+  loginMode = m;
+  $$('#dlgLogin .tabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  $('#nameField').classList.toggle('hidden', m !== 'register');
+  $('#loginBtn').textContent = m === 'login' ? '登入' : '註冊並登入';
+}
+$$('#dlgLogin .tabs button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+$('#loginCancel').onclick = () => $('#dlgLogin').close();
+$('#loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    me = await api(loginMode === 'login' ? '/api/login' : '/api/register', { method: 'POST', body: Object.fromEntries(f) });
+    $('#dlgLogin').close();
+    e.target.reset();
+    toast(`歡迎，${me.name}`, 'ok');
+    afterLogin(true);
+  } catch (err) { const el = $('#loginErr'); el.textContent = err.message; el.classList.remove('hidden'); }
+};
+async function loadProviders() {
+  const p = await api('/api/auth/providers');
+  $('#oauth').innerHTML = Object.entries(p).map(([k, v]) => `<button type="button" class="${k}" ${v.enabled ? '' : 'disabled title="尚未設定，見 README"'} onclick="location.href='/auth/${k}'">${esc(v.label)}</button>`).join('');
+}
+function afterLogin(fresh) {
+  renderUser(); renderCart(); loadOrders();
+  if (me.role === 'boss' && fresh) toast('老闆帳號請到「老闆後台」管理訂單');
+  if (es) es.close();
+  es = connectEvents({
+    order: (o) => {
+      const old = myOrders.find((x) => x.id === o.id);
+      if (old && old.status !== o.status) {
+        if (o.status === '已接單') notify('店家已接單', `取餐號碼 ${o.number}，預計 ${o.pickupTime} 取餐`);
+        else if (o.status === '製作完成') notify('餐點完成，請取餐', `取餐號碼 ${o.number}`);
+        else if (o.status === '已拒絕') notify('訂單被拒絕', o.rejectReason, 'bad');
+        else if (o.status === '已取消' && o.cancelReason) notify('訂單已自動取消', o.cancelReason, 'bad');
+        else if (o.status === '已取消' && old.status !== '待接單') notify('店家已取消訂單', `訂單 #${o.id}`, 'bad');
+      }
+      const i = myOrders.findIndex((x) => x.id === o.id);
+      if (i >= 0) myOrders[i] = o; else myOrders.unshift(o);
+      renderOrders();
+    },
+    me: (u) => { me = u; renderUser(); renderCart(); },
+    menu: () => loadMenu().then(renderCart),
+  });
+}
+
+// ─────────── 切換頁面 ───────────
+function show(v) {
+  $$('header nav button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  $('#view-menu').classList.toggle('hidden', v !== 'menu');
+  $('#view-orders').classList.toggle('hidden', v !== 'orders');
+  if (v === 'orders') renderOrders();
+  renderCart();
+}
+$$('header nav button').forEach((b) => (b.onclick = () => show(b.dataset.view)));
+setInterval(() => loadMenu().then(renderCart), 60000);   // 每分鐘更新可預約時段
+
+init();
+</script>
+</body>
+</html>
