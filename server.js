@@ -613,6 +613,42 @@ route('GET', '/api/boss/stats', (c) => {
   };
 }, 'boss');
 
+// 老闆：歷史訂單與營收報表（自訂日期區間）
+const HISTORY_MAX_DAYS = 366, HISTORY_MAX_ROWS = 500;
+const dayToMs = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  if (!m) return null;
+  const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(ms).toISOString().slice(0, 10) === m[0] ? ms : null;   // 擋掉 2026-02-31 這種不存在的日期
+};
+route('GET', '/api/boss/history', (c) => {
+  const from = c.query.get('from'), to = c.query.get('to');
+  const a = dayToMs(from), b = dayToMs(to);
+  if (a === null || b === null) fail(400, '日期格式需為 YYYY-MM-DD');
+  if (a > b) fail(400, '結束日期不能早於開始日期');
+  const days = (b - a) / 86400000 + 1;
+  if (days > HISTORY_MAX_DAYS) fail(400, `查詢區間最多 ${HISTORY_MAX_DAYS} 天`);
+
+  const scoped = db.orders.filter((o) => o.date >= from && o.date <= to);
+  const sold = scoped.filter((o) => ACTIVE_SALE.includes(o.status));
+  const byDay = {};
+  for (let i = 0; i < days; i++) byDay[new Date(a + i * 86400000).toISOString().slice(0, 10)] = { orders: 0, revenue: 0 };
+  for (const o of sold) { byDay[o.date].orders++; byDay[o.date].revenue += o.total; }
+  const statusCounts = {};
+  for (const o of scoped) statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
+  const revenue = sold.reduce((s, o) => s + o.total, 0);
+  const list = scoped.slice().sort((x, y) => y.date.localeCompare(x.date) || y.id - x.id);
+  return {
+    from, to, days,
+    summary: {
+      orders: sold.length, revenue, avgOrder: sold.length ? Math.round(revenue / sold.length) : 0,
+      pointsUsed: sold.reduce((s, o) => s + o.pointsUsed, 0), allOrders: scoped.length, statusCounts,
+    },
+    daily: Object.entries(byDay).map(([date, d]) => ({ date, ...d })),
+    orders: list.slice(0, HISTORY_MAX_ROWS), truncated: list.length > HISTORY_MAX_ROWS,
+  };
+}, 'boss');
+
 // ───────────────────────── 第三方登入（OAuth 2.0） ─────────────────────────
 const PROVIDERS = {
   github: {

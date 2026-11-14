@@ -13,7 +13,7 @@
 | --- | -------- | -------- |
 | 0.1 | 原文記載已完成 MVP；原始文件版號與改版日期未提供 | 2026/10/13 |
 | 0.2 | 原文件所載功能與實作說明 | 2026/10/27 |
-| 0.3 |  |  |
+| 0.3 | Iteration 3：新增歷史訂單與營收報表（FR-15）的介面、畫面與類別設計 | 〔請填日期〕 |
 | 1.0 |  |  |
 
 ---
@@ -132,7 +132,7 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- | --- |
 | 事件串流 | 即時推播模組 | common.js `connectEvents()` | GET /api/events（text/event-stream） | cookie | `order`、`me`、`menu` 事件 | 訂單變動推給老闆與該顧客；點數變動推給本人；菜單或設定變動推給所有連線；每 25 秒送心跳 |
 
-### 2.5 老闆後台（FR-9～FR-14）
+### 2.5 老闆後台（FR-9～FR-15）
 
 | 介面名稱 | 介面提供者 | 介面使用者 | 連結方式 | 輸入資料 | 輸出資料 | 介面描述 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -146,6 +146,7 @@ flowchart TB
 | 上傳照片 | 菜單模組 | 後台 `bindPhoto()` | POST /api/boss/upload | dataUrl（前端已縮圖的 base64） | 照片網址 | PNG／JPG／WEBP／GIF，解碼後 2 MB 內，檔名隨機 |
 | 營業設定 | 設定模組 | 後台 `saveSettings()` | GET、PUT /api/boss/settings | open、close、accepting、pointRate | 設定 | 打烊需晚於開店；點數門檻 1–1000 元 |
 | 銷售統計 | 統計與評價模組 | 後台 `loadStats()` | GET /api/boss/stats?range=today、month、all | range | 有效訂單數、營業額、客單價、點數折抵、銷售排行、各狀態數、評價分布 | 有效訂單為已接單、製作完成、已取餐 |
+| 歷史報表 | 統計與評價模組 | 後台 `loadHistory()` | GET /api/boss/history?from=YYYY-MM-DD&to=YYYY-MM-DD | from、to | 區間摘要（有效訂單數、營業額、客單價、點數折抵、各狀態數）、每日營業額、訂單明細（最多 500 筆）與是否截斷 | 區間最多 366 天；日期格式錯誤或順序顛倒回 400；CSV 由前端 `historyCsv()` 依回傳明細產生 |
 
 ### 2.6 後端內部介面
 
@@ -291,6 +292,7 @@ sequenceDiagram
 | UI-07 | 〔插入截圖〕餐點、套餐與營業設定 | 餐點表單含照片上傳與選項群組編輯（群組名稱、選擇方式、選項與加價）；套餐表單顯示單點合計；設定頁含營業時間、接單開關、點數門檻 |
 | UI-08 | 〔插入截圖〕銷售統計 | 今日／本月／全部切換；營業額、有效訂單數、客單價、點數折抵、各分類銷售排行、評價表 |
 | UI-09 | 〔插入截圖〕手機版介面 | 顧客頁兩欄菜單與底部購物車列；後台表格改卡片、分頁列可滑動 |
+| UI-10 | 〔插入截圖〕歷史報表 | 日期區間與快捷按鈕（近 7 天、近 30 天、本月、上月）；摘要數字、每日營業額長條、訂單明細表；右上角匯出 CSV |
 
 ---
 
@@ -539,6 +541,8 @@ classDiagram
     +editCombo(id)
     +shrink(file)
     +loadStats()
+    +loadHistory()
+    +historyCsv()
     +saveSettings(patch)
   }
   class Common {

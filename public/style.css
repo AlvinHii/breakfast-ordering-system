@@ -241,6 +241,17 @@ code { background: var(--color-surface-2); color: var(--color-secondary); paddin
 .hscroll { overflow-x: auto; }
 td.c-act { white-space: nowrap; }
 
+/* ---------- 歷史訂單與營收報表 ---------- */
+.hist-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 16px; padding: 16px 20px; }
+.hist-form > div:not(.tabs):not(.err) { flex: 1 1 150px; max-width: 200px; }
+.hist-form label { margin-top: 0; }
+.hist-form .err { flex: 1 1 100%; margin-top: 0; }
+.hist-table td.price { white-space: nowrap; }
+@media (max-width: 820px) {
+  .hist-form > div:not(.tabs):not(.err) { max-width: none; }
+  .hist-form .tabs { flex: 1 1 100%; }
+}
+
 /* ---------- 手機：後台 ---------- */
 @media (max-width: 820px) {
   header.top { padding: 10px 14px; gap: 8px 12px; }
@@ -261,6 +272,9 @@ td.c-act { white-space: nowrap; }
   table.rtable td.c-ph .ph { width: 64px; height: 64px; border-radius: 12px; }
   table.rtable td[data-label]::before { content: attr(data-label) "："; color: var(--color-muted-fg); font-size: .85rem; }
   table.rtable td.c-act { padding-top: 8px; }
+  /* 歷史訂單沒有照片欄，卡片改成單欄 */
+  table.hist-table tr { grid-template-columns: 1fr; }
+  table.hist-table td { grid-column: 1; }
 
   .hbar { grid-template-columns: 1fr 70px; gap: 2px 8px; }
   .hbar .bar { grid-column: 1 / -1; grid-row: 2; }
