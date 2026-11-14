@@ -24,7 +24,13 @@ const S = {
 };
 const ACTIVE_SALE = [S.ACCEPTED, S.READY, S.PICKED];   // 算進銷售的狀態
 const FINAL = [S.PICKED, S.REJECTED, S.CANCELLED];
-const ICE = ['正常冰', '少冰', '去冰', '熱'];
+
+// 客製選項群組：one＝單選必選、maybe＝單選可不選、many＝複選。每個選項可以加價。
+const GROUP_TYPES = ['one', 'maybe', 'many'];
+const choices = (...list) => list.map((x) => (typeof x === 'string' ? { label: x, price: 0 } : { label: x[0], price: x[1] }));
+const G_ICE = { name: '冰塊', type: 'one', choices: choices('正常冰', '少冰', '去冰', '熱') };
+const G_SUGAR = { name: '甜度', type: 'one', choices: choices('正常糖', '半糖', '微糖', '無糖') };
+const G_ADD = { name: '加料', type: 'many', choices: choices(['加蛋', 10], ['加起司', 10]) };
 
 // ───────────────────────── 時間（台北時區） ─────────────────────────
 function taipeiNow() {
@@ -56,7 +62,12 @@ function shopState() {
 // ───────────────────────── 資料存取 ─────────────────────────
 let db;
 const nextId = (k) => ++db.seq[k];
-function save() { fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2)); }
+// 先寫到暫存檔再改名：就算寫到一半當機，原本的 data.json 也不會壞掉
+function save() {
+  const tmp = DATA_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+  fs.renameSync(tmp, DATA_FILE);
+}
 
 function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
   return { salt, hash: crypto.scryptSync(String(pw), salt, 32).toString('hex') };
@@ -81,17 +92,20 @@ function seed() {
   addUser('boss', process.env.BOSS_PASSWORD || 'boss1234', '老闆', 'boss');
   addUser('demo', 'demo1234', '示範同學', 'customer');
 
-  const addItem = (name, price, category, desc, options = []) => db.menu.push({
-    id: nextId('menu'), name, price, category, desc, options, photo: '', available: true,
+  const addItem = (name, price, category, desc, groups = []) => db.menu.push({
+    id: nextId('menu'), name, price, category, desc, groups, photo: '', available: true,
   });
-  addItem('蛋餅', 35, '蛋餅', '現煎餅皮加蛋，外酥內軟');
-  addItem('火腿蛋堡', 45, '漢堡吐司', '火腿、荷包蛋夾入烤過的漢堡麵包');
-  addItem('火腿蛋吐司', 40, '漢堡吐司', '火腿、荷包蛋與吐司');
-  addItem('奶茶', 25, '飲料', '店內自煮紅茶加奶', ICE);
-  addItem('紅茶', 20, '飲料', '古早味紅茶', ICE);
-  addItem('豆漿', 20, '飲料', '無糖豆漿', ['冰', '熱']);
+  const G_SAUCE = { name: '醬料', type: 'one', choices: choices('醬油膏', '辣椒醬', '醬油膏＋辣', '不加醬') };
+  const G_NO = { name: '其他', type: 'many', choices: choices('不要美乃滋', '不要小黃瓜') };
+  addItem('蛋餅', 35, '蛋餅', '現煎餅皮加蛋，外酥內軟',
+    [{ name: '加料', type: 'many', choices: choices(['加蛋', 10], ['加起司', 10], ['加玉米', 10]) }, G_SAUCE]);
+  addItem('火腿蛋堡', 45, '漢堡吐司', '火腿、荷包蛋夾入烤過的漢堡麵包', [G_ADD, G_NO]);
+  addItem('火腿蛋吐司', 40, '漢堡吐司', '火腿、荷包蛋與吐司', [G_ADD, G_NO, { name: '吐司', type: 'maybe', choices: choices('去邊', ['加厚片', 5]) }]);
+  addItem('奶茶', 25, '飲料', '店內自煮紅茶加奶', [G_ICE, G_SUGAR]);
+  addItem('紅茶', 20, '飲料', '古早味紅茶', [G_ICE, G_SUGAR]);
+  addItem('豆漿', 20, '飲料', '無糖豆漿', [{ name: '溫度', type: 'one', choices: choices('冰', '熱') }]);
   db.combos.push({
-    id: nextId('combo'), name: '早八套餐', price: 65, desc: '火腿蛋堡＋奶茶（正常冰）',
+    id: nextId('combo'), name: '早八套餐', price: 65, desc: '火腿蛋堡＋奶茶，奶茶冰塊甜度可選',
     items: [{ ref: 2, qty: 1 }, { ref: 4, qty: 1 }], photo: '', available: true,
   });
 }
@@ -99,6 +113,17 @@ function seed() {
 function load() {
   if (fs.existsSync(DATA_FILE)) db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   else { seed(); save(); }
+  // 舊版資料：options（單一選項清單）自動轉成選項群組
+  let migrated = false;
+  for (const m of db.menu) {
+    if (!Array.isArray(m.groups)) {
+      const old = Array.isArray(m.options) ? m.options : [];
+      m.groups = old.length ? [{ name: '選項', type: 'one', choices: choices(...old) }] : [];
+      delete m.options;
+      migrated = true;
+    }
+  }
+  if (migrated) save();
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
@@ -176,6 +201,58 @@ function refund(o, { deductEarned = false } = {}) {
 }
 function getOrder(id) { return db.orders.find((o) => o.id === Number(id)) || fail(404, '找不到訂單'); }
 
+// 檢查顧客選的客製選項，算出加價和要印在訂單上的文字
+function resolveChoices(m, picked) {
+  const src = picked && typeof picked === 'object' && !Array.isArray(picked) ? picked : {};
+  let extra = 0; const parts = []; const clean = {};
+  for (const g of m.groups) {
+    const want = Array.isArray(src[g.name]) ? [...new Set(src[g.name].map(String))] : [];
+    const chosen = g.choices.filter((c) => want.includes(c.label));
+    if (chosen.length !== want.length) fail(400, `「${m.name}」的「${g.name}」選項不正確，請重新選擇`);
+    if (g.type === 'one' && chosen.length !== 1) fail(400, `請選擇「${m.name}」的${g.name}`);
+    if (g.type === 'maybe' && chosen.length > 1) fail(400, `「${m.name}」的${g.name}只能選一個`);
+    if (!chosen.length) continue;
+    clean[g.name] = chosen.map((c) => c.label);
+    parts.push(chosen.map((c) => c.label + (c.price ? `+${c.price}` : '')).join('、'));
+    extra += chosen.reduce((s, c) => s + c.price, 0);
+  }
+  return { extra, note: parts.join('、'), choices: clean };
+}
+
+// 取餐時間到了還沒接單的訂單，自動取消並退回點數
+function expireOrders() {
+  const { date, minutes } = taipeiNow();
+  let changed = false;
+  for (const o of db.orders) {
+    if (o.status !== S.PENDING) continue;
+    if (o.date < date || (o.date === date && toMin(o.pickupTime) <= minutes)) {
+      o.cancelReason = '店家未在取餐時間前接單，系統已自動取消';
+      setStatus(o, S.CANCELLED);
+      refund(o);
+      emitOrder(o);
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+setInterval(expireOrders, 30 * 1000).unref();
+
+// 登入失敗太多次就暫時鎖住（防止有人一直猜密碼）
+const LOGIN_MAX = 5, LOGIN_WINDOW = 10 * 60 * 1000;
+const loginFails = new Map();
+function loginKey(req, username) { return `${req.socket.remoteAddress}|${String(username || '').toLowerCase()}`; }
+function checkLoginLock(key) {
+  const f = loginFails.get(key);
+  if (f && f.count >= LOGIN_MAX && Date.now() - f.first < LOGIN_WINDOW) {
+    fail(429, `登入失敗太多次，請 ${Math.ceil((LOGIN_WINDOW - (Date.now() - f.first)) / 60000)} 分鐘後再試`);
+  }
+}
+function recordLoginFail(key) {
+  const f = loginFails.get(key);
+  if (!f || Date.now() - f.first >= LOGIN_WINDOW) loginFails.set(key, { count: 1, first: Date.now() });
+  else f.count++;
+}
+
 function ratingSummary() {
   const out = {};
   for (const r of db.ratings) {
@@ -226,8 +303,11 @@ route('POST', '/api/register', (c) => {
 });
 
 route('POST', '/api/login', (c) => {
+  const key = loginKey(c.req, c.body.username);
+  checkLoginLock(key);
   const u = db.users.find((x) => x.username.toLowerCase() === String(c.body.username || '').toLowerCase());
-  if (!u || !checkPassword(u, c.body.password)) fail(401, '帳號或密碼錯誤');
+  if (!u || !checkPassword(u, c.body.password)) { recordLoginFail(key); fail(401, '帳號或密碼錯誤'); }
+  loginFails.delete(key);
   startSession(c.res, u);
   return publicUser(u);
 });
@@ -249,7 +329,7 @@ route('GET', '/api/menu', () => {
     shop: st,
     menu: db.menu.filter((m) => m.available),
     combos: db.combos.filter((c) => c.available).map((c) => ({
-      ...c, contents: c.items.map((i) => ({ ...i, name: (db.menu.find((m) => m.id === i.ref) || {}).name || '?' })),
+      ...c, contents: c.items.map((i) => { const m = db.menu.find((x) => x.id === i.ref) || {}; return { ...i, name: m.name || '?', groups: m.groups || [] }; }),
     })),
     ratings: ratingSummary(),
     popular,
@@ -275,15 +355,21 @@ route('POST', '/api/orders', (c) => {
     const qty = int(it.qty, 1, 20, '數量');
     if (it.type === 'combo') {
       const cb = db.combos.find((x) => x.id === Number(it.ref) && x.available) || fail(400, '套餐不存在或已下架');
-      return { type: 'combo', ref: cb.id, name: cb.name, price: cb.price, qty, note: '' };
+      const sent = Array.isArray(it.parts) ? it.parts : [];
+      let extra = 0; const notes = []; const parts = [];
+      cb.items.forEach((ci, k) => {
+        const m = db.menu.find((x) => x.id === ci.ref);
+        if (!m || !m.available) fail(400, `套餐「${cb.name}」裡的${m ? `「${m.name}」` : '餐點'}目前售完`);
+        const r = resolveChoices(m, sent[k]);
+        extra += r.extra * ci.qty;
+        parts.push(r.choices);
+        if (r.note) notes.push(`${m.name}：${r.note}`);
+      });
+      return { type: 'combo', ref: cb.id, name: cb.name, price: cb.price + extra, qty, note: notes.join('；'), parts };
     }
     const m = db.menu.find((x) => x.id === Number(it.ref) && x.available) || fail(400, '餐點不存在或已下架');
-    let note = '';
-    if (m.options.length) {
-      note = String(it.note || '');
-      if (!m.options.includes(note)) fail(400, `「${m.name}」的選項不正確`);
-    }
-    return { type: 'item', ref: m.id, name: m.name, price: m.price, qty, note };
+    const r = resolveChoices(m, it.choices);
+    return { type: 'item', ref: m.id, name: m.name, price: m.price + r.extra, qty, note: r.note, choices: r.choices };
   });
 
   const pmin = toMin(c.body.pickupTime);
@@ -364,6 +450,11 @@ route('GET', '/api/boss/orders', () => {
 route('POST', '/api/boss/orders/:id/accept', (c) => {
   const o = getOrder(c.params.id);
   if (o.status !== S.PENDING) fail(400, `訂單目前為「${o.status}」，無法接單`);
+  const { date, minutes } = taipeiNow();
+  if (o.date < date || (o.date === date && toMin(o.pickupTime) <= minutes)) {
+    expireOrders();
+    fail(400, '這筆訂單的取餐時間已經過了，系統已自動取消');
+  }
   const n = db.orders.filter((x) => x.date === o.date && x.number).length + 1;
   o.number = 'A' + String(n).padStart(2, '0');
   setStatus(o, S.ACCEPTED);
@@ -416,13 +507,35 @@ route('POST', '/api/boss/upload', (c) => {
 }, 'boss');
 
 // 老闆：餐點
+function readGroups(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  if (list.length > 6) fail(400, '客製選項群組最多 6 組');
+  const names = new Set();
+  return list.map((g) => {
+    const name = str(g && g.name, 10, '群組名稱');
+    if (names.has(name)) fail(400, `群組名稱「${name}」重複了`);
+    names.add(name);
+    if (!GROUP_TYPES.includes(g.type)) fail(400, `「${name}」的選擇方式不正確`);
+    const cs = Array.isArray(g.choices) ? g.choices : [];
+    if (!cs.length) fail(400, `「${name}」至少要有一個選項`);
+    if (cs.length > 12) fail(400, `「${name}」最多 12 個選項`);
+    const labels = new Set();
+    return {
+      name, type: g.type,
+      choices: cs.map((c) => {
+        const label = str(c && c.label, 12, `「${name}」的選項`);
+        if (labels.has(label)) fail(400, `「${name}」有重複的選項「${label}」`);
+        labels.add(label);
+        return { label, price: int(c.price ?? 0, 0, 500, `「${label}」加價`) };
+      }),
+    };
+  });
+}
 function readItem(b) {
-  const options = Array.isArray(b.options) ? b.options.map((o) => str(o, 10, '選項')).filter(Boolean) : [];
-  if (options.length > 10) fail(400, '選項最多 10 個');
   return {
     name: str(b.name, 30, '餐點名稱'), price: int(b.price, 1, 9999, '單價'),
     category: str(b.category, 20, '分類'), desc: str(b.desc, 200, '說明', { required: false }),
-    options: [...new Set(options)], photo: photoPath(b.photo), available: b.available !== false,
+    groups: readGroups(b.groups), photo: photoPath(b.photo), available: b.available !== false,
   };
 }
 route('GET', '/api/boss/menu', () => ({ menu: db.menu, combos: db.combos }), 'boss');
@@ -626,6 +739,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 load();
+expireOrders();
 server.listen(PORT, () => {
   console.log(`北寧路早餐店系統已啟動`);
   console.log(`  顧客點餐： ${BASE_URL}/`);
