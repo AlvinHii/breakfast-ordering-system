@@ -87,10 +87,7 @@
       <div class="row"><div style="flex:1"><label>單價（元）</label><input name="price" type="number" min="1" max="9999" required></div>
         <div style="flex:1"><label>分類</label><input name="category" list="catList" maxlength="20" required><datalist id="catList"></datalist></div></div>
       <label>說明</label><textarea name="desc" maxlength="200"></textarea>
-      <label>客製選項群組（例如：冰塊、甜度、加料；沒有就不用新增）</label>
-      <div id="groupList"></div>
-      <button type="button" class="ghost" style="margin-top:6px" onclick="addGroupRow()">＋ 新增選項群組</button>
-      <p class="muted" style="margin:6px 0 0">選項用逗號分隔，要加價就在後面寫「+金額」，例如：<code>加蛋+10, 加起司+10</code></p>
+      <label>客製選項（用逗號分隔，例如：正常冰,少冰,去冰,熱；沒有就留空）</label><input name="options">
       <label>照片</label><input type="file" accept="image/*" data-photo>
       <input type="hidden" name="photo"><img class="preview hidden" data-preview alt="">
       <label class="inline"><input type="checkbox" name="available" checked> 上架中（取消勾選即下架）</label>
@@ -171,14 +168,6 @@ $$('#nav button').forEach((b) => (b.onclick = () => show(b.dataset.tab)));
 
 // ─────────── 訂單 ───────────
 async function loadOrders() { orders = await api('/api/boss/orders'); renderOrders(); }
-const nowMin = () => { const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date()).split(':').map(Number); return h * 60 + m; };
-// 待接單的訂單快到取餐時間時提醒老闆（時間到了系統會自動取消）
-function urgency(o) {
-  if (o.status !== '待接單' || o.date !== todayStr()) return '';
-  const [h, m] = o.pickupTime.split(':').map(Number);
-  const left = h * 60 + m - nowMin();
-  return left <= 10 ? `<div class="urgent">距離取餐只剩 ${Math.max(0, left)} 分鐘，再不接單會自動取消</div>` : '';
-}
 function orderCard(o, flashId) {
   let actions = '';
   if (o.status === '待接單') actions = `<button class="ok" onclick="act(${o.id},'accept')">接受</button><button class="danger" onclick="reject(${o.id})">拒絕</button>`;
@@ -192,9 +181,7 @@ function orderCard(o, flashId) {
     </div>
     <div style="margin:8px 0;font-size:1.02rem">${o.items.map(lineText).join('<br>')}</div>
     <div class="spread"><b>合計 ${money(o.total)}</b><span class="muted">${o.pointsUsed ? `點數折抵 ${o.pointsUsed}` : ''}</span></div>
-    ${urgency(o)}
     ${o.status === '已拒絕' ? `<div class="muted">拒絕原因：${esc(o.rejectReason)}</div>` : ''}
-    ${o.status === '已取消' && o.cancelReason ? `<div class="muted">${esc(o.cancelReason)}</div>` : ''}
     <div class="row" style="margin-top:8px;justify-content:flex-end">${['已取餐', '已拒絕', '已取消'].includes(o.status) ? statusTag(o.status) : ''}
       ${cancellable && o.status !== '待接單' ? `<button class="link" onclick="cancelOrder(${o.id})">取消訂單</button>` : ''}${actions}</div>
   </div>`;
@@ -216,7 +203,6 @@ async function act(id, a, body = {}) {
 const setSt = (id, status) => act(id, 'status', { status });
 function reject(id) { const reason = prompt('拒絕原因（會顯示給顧客）', '餐點售完'); if (reason !== null) act(id, 'reject', { reason }); }
 function cancelOrder(id) { if (confirm('確定取消這筆訂單？會退回顧客使用的點數，並扣回這筆訂單得到的點數。')) act(id, 'cancel'); }
-setInterval(() => { if (me && me.role === 'boss') renderOrders(); }, 30000);   // 更新「剩幾分鐘」
 function upsert(o) { const i = orders.findIndex((x) => x.id === o.id); if (i < 0) orders.push(o); else orders[i] = o; renderOrders(); }
 
 // ─────────── 照片（先在瀏覽器縮圖，再上傳） ───────────
@@ -250,14 +236,11 @@ bindPhoto($('#itemForm')); bindPhoto($('#comboForm'));
 
 // ─────────── 餐點 ───────────
 async function loadMenu() { ({ menu, combos } = await api('/api/boss/menu')); renderMenuTable(); renderComboTable(); }
-const TYPE_LABEL = { one: '單選（必選）', maybe: '單選（可不選）', many: '複選' };
-const choiceText = (g) => g.choices.map((c) => (c.price ? `${c.label}+${c.price}` : c.label)).join(', ');
-const groupsSummary = (groups) => (groups || []).map((g) => `<div><b>${esc(g.name)}</b>：${esc(choiceText(g))}</div>`).join('') || '-';
 function renderMenuTable() {
-  $('#menuTable').innerHTML = `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>分類</th><th>單價</th><th>客製選項</th><th>狀態</th><th></th></tr>
-    ${menu.map((m) => `<tr><td class="c-ph">${thumb(m.photo, m.name)}</td><td class="c-main"><b>${esc(m.name)}</b><div class="muted">${esc(m.desc)}</div></td><td data-label="分類">${esc(m.category)}</td><td data-label="單價">${money(m.price)}</td>
-      <td data-label="客製選項" class="muted">${groupsSummary(m.groups)}</td><td data-label="狀態">${m.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
-      <td class="c-act"><button class="ghost" onclick="editItem(${m.id})">編輯</button> <button class="link" onclick="delItem(${m.id})">刪除</button></td></tr>`).join('')}</table>`;
+  $('#menuTable').innerHTML = `<table><tr><th>照片</th><th>名稱</th><th>分類</th><th>單價</th><th>客製選項</th><th>狀態</th><th></th></tr>
+    ${menu.map((m) => `<tr><td>${thumb(m.photo, m.name)}</td><td><b>${esc(m.name)}</b><div class="muted">${esc(m.desc)}</div></td><td>${esc(m.category)}</td><td>${money(m.price)}</td>
+      <td>${esc(m.options.join('、')) || '-'}</td><td>${m.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
+      <td style="white-space:nowrap"><button class="ghost" onclick="editItem(${m.id})">編輯</button> <button class="link" onclick="delItem(${m.id})">刪除</button></td></tr>`).join('')}</table>`;
   $('#catList').innerHTML = [...new Set(menu.map((m) => m.category))].map((c) => `<option value="${esc(c)}">`).join('');
 }
 function editItem(id) {
@@ -265,36 +248,14 @@ function editItem(id) {
   editingId = id || null; f.reset(); formErr(f, '');
   $('#itemTitle').textContent = m ? '編輯餐點' : '上架新餐點';
   f.name.value = m?.name || ''; f.price.value = m?.price || ''; f.category.value = m?.category || '';
-  f.desc.value = m?.desc || ''; f.photo.value = m?.photo || '';
+  f.desc.value = m?.desc || ''; f.options.value = (m?.options || []).join(','); f.photo.value = m?.photo || '';
   f.available.checked = m ? m.available : true; showPreview(f, m?.photo);
-  $('#groupList').innerHTML = '';
-  (m?.groups || []).forEach(addGroupRow);
   $('#dlgItem').showModal();
-}
-function addGroupRow(g) {
-  const div = document.createElement('div');
-  div.className = 'grp-row';
-  div.innerHTML = `<div class="row"><input class="g-name" placeholder="群組名稱，例如：冰塊" maxlength="10" value="${esc(g?.name || '')}">
-      <select class="g-type">${Object.entries(TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${(g?.type || 'one') === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-      <button type="button" class="link" onclick="this.closest('.grp-row').remove()">移除</button></div>
-    <input class="g-choices" placeholder="例如：正常冰, 少冰, 去冰  或  加蛋+10, 加起司+10" value="${esc(g ? choiceText(g) : '')}">`;
-  $('#groupList').appendChild(div);
-  if (!g) $('.g-name', div).focus();
-}
-function readGroupRows() {
-  return $$('#groupList .grp-row').map((row) => ({
-    name: $('.g-name', row).value.trim(),
-    type: $('.g-type', row).value,
-    choices: $('.g-choices', row).value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean).map((s) => {
-      const m = /^(.*?)\s*\+\s*(\d+)\s*$/.exec(s);
-      return m ? { label: m[1], price: Number(m[2]) } : { label: s, price: 0 };
-    }),
-  })).filter((g) => g.name || g.choices.length);
 }
 $('#itemForm').onsubmit = async (e) => {
   e.preventDefault(); const f = e.target;
   const body = { name: f.name.value, price: Number(f.price.value), category: f.category.value, desc: f.desc.value,
-    groups: readGroupRows(), photo: f.photo.value, available: f.available.checked };
+    options: f.options.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean), photo: f.photo.value, available: f.available.checked };
   try {
     await api(editingId ? `/api/boss/menu/${editingId}` : '/api/boss/menu', { method: editingId ? 'PUT' : 'POST', body });
     $('#dlgItem').close(); toast('已儲存', 'ok'); loadMenu();
@@ -309,11 +270,11 @@ async function delItem(id) {
 const comboText = (c) => c.items.map((i) => `${(menu.find((m) => m.id === i.ref) || {}).name || '?'} x ${i.qty}`).join('、');
 const comboOrig = (items) => items.reduce((s, i) => s + ((menu.find((m) => m.id === i.ref) || {}).price || 0) * i.qty, 0);
 function renderComboTable() {
-  $('#comboTable').innerHTML = combos.length ? `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>內容</th><th>價格</th><th>狀態</th><th></th></tr>
-    ${combos.map((c) => `<tr><td class="c-ph">${thumb(c.photo, c.name)}</td><td class="c-main"><b>${esc(c.name)}</b><div class="muted">${esc(c.desc)}</div></td><td data-label="內容">${esc(comboText(c))}</td>
-      <td data-label="價格">${money(c.price)} <span class="muted">（原價 ${money(comboOrig(c.items))}）</span></td>
-      <td data-label="狀態">${c.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
-      <td class="c-act"><button class="ghost" onclick="editCombo(${c.id})">編輯</button> <button class="link" onclick="delCombo(${c.id})">刪除</button></td></tr>`).join('')}</table>`
+  $('#comboTable').innerHTML = combos.length ? `<table><tr><th>照片</th><th>名稱</th><th>內容</th><th>價格</th><th>狀態</th><th></th></tr>
+    ${combos.map((c) => `<tr><td>${thumb(c.photo, c.name)}</td><td><b>${esc(c.name)}</b><div class="muted">${esc(c.desc)}</div></td><td>${esc(comboText(c))}</td>
+      <td>${money(c.price)} <span class="muted">（原價 ${money(comboOrig(c.items))}）</span></td>
+      <td>${c.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
+      <td style="white-space:nowrap"><button class="ghost" onclick="editCombo(${c.id})">編輯</button> <button class="link" onclick="delCombo(${c.id})">刪除</button></td></tr>`).join('')}</table>`
     : '<div class="empty">還沒有套餐</div>';
 }
 function editCombo(id) {
@@ -362,8 +323,8 @@ async function loadStats() {
       : '<div class="empty">這段期間還沒有銷售</div>'}
     </div>
     <div class="panel"><h3 style="margin-bottom:8px">餐點評價（全部期間）</h3>
-      ${s.ratings.length ? `<div class="hscroll"><table><tr><th>餐點</th><th>平均</th><th>則數</th>${[5, 4, 3, 2, 1, 0].map((n) => `<th>${n}★</th>`).join('')}</tr>
-        ${s.ratings.map((r) => `<tr><td>${esc(r.name)}</td><td><span class="stars">★</span> ${r.avg.toFixed(1)}</td><td>${r.count}</td>${[5, 4, 3, 2, 1, 0].map((n) => `<td>${r.dist[n]}</td>`).join('')}</tr>`).join('')}</table></div>`
+      ${s.ratings.length ? `<table><tr><th>餐點</th><th>平均</th><th>則數</th>${[5, 4, 3, 2, 1, 0].map((n) => `<th>${n}★</th>`).join('')}</tr>
+        ${s.ratings.map((r) => `<tr><td>${esc(r.name)}</td><td><span class="stars">★</span> ${r.avg.toFixed(1)}</td><td>${r.count}</td>${[5, 4, 3, 2, 1, 0].map((n) => `<td>${r.dist[n]}</td>`).join('')}</tr>`).join('')}</table>`
       : '<div class="empty">還沒有評價</div>'}
     </div>`;
 }

@@ -1,0 +1,9 @@
+# 執行資料（含顧客帳號與訂單，不要公開）
+data.json
+uploads/*
+!uploads/.gitkeep
+
+# 本機工具設定
+.claude/
+node_modules/
+.env

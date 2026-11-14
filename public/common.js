@@ -61,19 +61,6 @@ const thumb = (photo, name, cls = 'ph') => photo
   ? `<img class="${cls}" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">`
   : `<div class="${cls} ph-empty">${esc(String(name || '?').slice(0, 1))}</div>`;
 
-// 客製選項：算加價與顯示文字（和伺服器的 resolveChoices 一致，伺服器會再檢查一次）
-const GROUP_HINT = { one: '必選一項', maybe: '可不選，最多一項', many: '可複選' };
-function calcChoices(groups, picked = {}) {
-  let extra = 0; const parts = [];
-  for (const g of groups || []) {
-    const chosen = g.choices.filter((c) => (picked[g.name] || []).includes(c.label));
-    if (!chosen.length) continue;
-    extra += chosen.reduce((s, c) => s + c.price, 0);
-    parts.push(chosen.map((c) => c.label + (c.price ? `+${c.price}` : '')).join('、'));
-  }
-  return { extra, note: parts.join('、') };
-}
-
 // 即時推播連線（Server-Sent Events），斷線會自動重連
 function connectEvents(handlers) {
   const es = new EventSource('/api/events');
