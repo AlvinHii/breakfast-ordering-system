@@ -13,7 +13,7 @@
 | --- | -------- | -------- |
 | 0.1 | 原文記載已完成 MVP；原始文件版號與改版日期未提供 | 2026/10/13 |
 | 0.2 | 原文件所載功能與實作說明 | 2026/10/27 |
-| 0.3 | Iteration 3：新增歷史訂單與營收報表（FR-15）的介面、畫面與類別設計 | 〔請填日期〕 |
+| 0.3 | Iteration 3：新增歷史訂單與營收報表（FR-15）、今日售完（FR-16）的介面、畫面、資料與類別設計 | 〔請填日期〕 |
 | 1.0 |  |  |
 
 ---
@@ -132,7 +132,7 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- | --- |
 | 事件串流 | 即時推播模組 | common.js `connectEvents()` | GET /api/events（text/event-stream） | cookie | `order`、`me`、`menu` 事件 | 訂單變動推給老闆與該顧客；點數變動推給本人；菜單或設定變動推給所有連線；每 25 秒送心跳 |
 
-### 2.5 老闆後台（FR-9～FR-15）
+### 2.5 老闆後台（FR-9～FR-16）
 
 | 介面名稱 | 介面提供者 | 介面使用者 | 連結方式 | 輸入資料 | 輸出資料 | 介面描述 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -142,6 +142,7 @@ flowchart TB
 | 更新進度 | 訂單模組 | 後台 `setSt()` | POST /api/boss/orders/:id/status | status：製作完成或已取餐 | 訂單 | 只允許「已接單→製作完成→已取餐」；已取餐時發放點數 |
 | 老闆取消 | 訂單模組 | 後台 `cancelOrder()` | POST /api/boss/orders/:id/cancel | 訂單 id | 訂單 | 已拒絕、已取消以外皆可取消；退回使用點數並扣回已發點數 |
 | 餐點管理 | 菜單模組 | 後台 `editItem()`、`delItem()` | GET、POST /api/boss/menu；PUT、DELETE /api/boss/menu/:id | 名稱、單價、分類、說明、groups、照片、上架狀態 | 餐點 | 選項群組最多 6 組、每組最多 12 個選項、加價 0–500；被套餐使用的餐點不可刪除 |
+| 今日售完 | 菜單模組 | 後台 `toggleSoldOut()` | POST /api/boss/menu/:id/soldout | soldOut（true／false） | 餐點（含 soldOutDate） | 寫入或清除今天的台北日期；`/api/menu` 回傳 soldOut 旗標，套餐內任一項售完即整個套餐 soldOut；下單時以 `isSoldOut()` 阻擋 |
 | 套餐管理 | 菜單模組 | 後台 `editCombo()`、`delCombo()` | POST /api/boss/combos；PUT、DELETE /api/boss/combos/:id | 名稱、價格、說明、items[ref, qty]、照片、上架狀態 | 套餐 | 套餐內每項數量 1–10 |
 | 上傳照片 | 菜單模組 | 後台 `bindPhoto()` | POST /api/boss/upload | dataUrl（前端已縮圖的 base64） | 照片網址 | PNG／JPG／WEBP／GIF，解碼後 2 MB 內，檔名隨機 |
 | 營業設定 | 設定模組 | 後台 `saveSettings()` | GET、PUT /api/boss/settings | open、close、accepting、pointRate | 設定 | 打烊需晚於開店；點數門檻 1–1000 元 |
@@ -293,6 +294,7 @@ sequenceDiagram
 | UI-08 | 〔插入截圖〕銷售統計 | 今日／本月／全部切換；營業額、有效訂單數、客單價、點數折抵、各分類銷售排行、評價表 |
 | UI-09 | 〔插入截圖〕手機版介面 | 顧客頁兩欄菜單與底部購物車列；後台表格改卡片、分頁列可滑動 |
 | UI-10 | 〔插入截圖〕歷史報表 | 日期區間與快捷按鈕（近 7 天、近 30 天、本月、上月）；摘要數字、每日營業額長條、訂單明細表；右上角匯出 CSV |
+| UI-11 | 〔插入截圖〕今日售完 | 後台餐點列「今日售完／恢復供應」按鈕與狀態標籤、套餐「含售完餐點」；顧客菜單卡片灰階並標示「今日售完」，對話框停用加入 |
 
 ---
 
@@ -341,6 +343,7 @@ erDiagram
     string desc
     string photo
     bool available
+    string soldOutDate "YYYY-MM-DD"
   }
   OPTION_GROUP {
     string name "max 6 per item"
@@ -536,6 +539,7 @@ classDiagram
     +urgency(order)
     +act(id, action, body)
     +editItem(id)
+    +toggleSoldOut(id)
     +addGroupRow(group)
     +readGroupRows()
     +editCombo(id)

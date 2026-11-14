@@ -273,9 +273,22 @@ const groupsSummary = (groups) => (groups || []).map((g) => `<div><b>${esc(g.nam
 function renderMenuTable() {
   $('#menuTable').innerHTML = `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>分類</th><th>單價</th><th>客製選項</th><th>狀態</th><th></th></tr>
     ${menu.map((m) => `<tr><td class="c-ph">${thumb(m.photo, m.name)}</td><td class="c-main"><b>${esc(m.name)}</b><div class="muted">${esc(m.desc)}</div></td><td data-label="分類">${esc(m.category)}</td><td data-label="單價">${money(m.price)}</td>
-      <td data-label="客製選項" class="muted">${groupsSummary(m.groups)}</td><td data-label="狀態">${m.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
-      <td class="c-act"><button class="ghost" onclick="editItem(${m.id})">編輯</button> <button class="link" onclick="delItem(${m.id})">刪除</button></td></tr>`).join('')}</table>`;
+      <td data-label="客製選項" class="muted">${groupsSummary(m.groups)}</td><td data-label="狀態">${itemStatus(m)}</td>
+      <td class="c-act">${m.available ? `<button class="${soldOutToday(m) ? 'ok' : 'secondary'}" onclick="toggleSoldOut(${m.id})">${soldOutToday(m) ? '恢復供應' : '今日售完'}</button> ` : ''}<button class="ghost" onclick="editItem(${m.id})">編輯</button> <button class="link" onclick="delItem(${m.id})">刪除</button></td></tr>`).join('')}</table>`;
   $('#catList').innerHTML = [...new Set(menu.map((m) => m.category))].map((c) => `<option value="${esc(c)}">`).join('');
+}
+// 今日售完：只在當天有效，隔天自動恢復（伺服器以台北時區判斷）
+const soldOutToday = (m) => !!m && m.soldOutDate === todayStr();
+const itemStatus = (m) => (!m.available ? '<span class="status st-done">已下架</span>'
+  : soldOutToday(m) ? '<span class="status st-bad">今日售完</span>' : '<span class="status st-ready">上架中</span>');
+async function toggleSoldOut(id) {
+  const m = menu.find((x) => x.id === id); if (!m) return;
+  const soldOut = !soldOutToday(m);
+  try {
+    await api(`/api/boss/menu/${id}/soldout`, { method: 'POST', body: { soldOut } });
+    toast(soldOut ? `「${m.name}」已標記今日售完，明天會自動恢復` : `「${m.name}」已恢復供應`, 'ok');
+    loadMenu();
+  } catch (e) { toast(e.message, 'bad'); }
 }
 function editItem(id) {
   const f = $('#itemForm'); const m = menu.find((x) => x.id === id);
@@ -329,7 +342,8 @@ function renderComboTable() {
   $('#comboTable').innerHTML = combos.length ? `<table class="rtable"><tr><th>照片</th><th>名稱</th><th>內容</th><th>價格</th><th>狀態</th><th></th></tr>
     ${combos.map((c) => `<tr><td class="c-ph">${thumb(c.photo, c.name)}</td><td class="c-main"><b>${esc(c.name)}</b><div class="muted">${esc(c.desc)}</div></td><td data-label="內容">${esc(comboText(c))}</td>
       <td data-label="價格">${money(c.price)} <span class="muted">（原價 ${money(comboOrig(c.items))}）</span></td>
-      <td data-label="狀態">${c.available ? '<span class="status st-ready">上架中</span>' : '<span class="status st-done">已下架</span>'}</td>
+      <td data-label="狀態">${!c.available ? '<span class="status st-done">已下架</span>'
+        : c.items.some((i) => soldOutToday(menu.find((m) => m.id === i.ref))) ? '<span class="status st-bad">含售完餐點</span>' : '<span class="status st-ready">上架中</span>'}</td>
       <td class="c-act"><button class="ghost" onclick="editCombo(${c.id})">編輯</button> <button class="link" onclick="delCombo(${c.id})">刪除</button></td></tr>`).join('')}</table>`
     : '<div class="empty">還沒有套餐</div>';
 }

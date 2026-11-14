@@ -115,8 +115,8 @@ function ratingLine(ref) {
 function card(type, x) {
   const ref = `${type}:${x.id}`;
   const hot = data.popular.includes(ref);
-  return `<div class="card" onclick="openItem('${type}',${x.id})">
-    ${hot ? '<span class="badge">本月熱門</span>' : ''}
+  return `<div class="card${x.soldOut ? ' sold-out' : ''}" onclick="openItem('${type}',${x.id})">
+    ${x.soldOut ? '<span class="badge badge-sold">今日售完</span>' : hot ? '<span class="badge">本月熱門</span>' : ''}
     ${thumb(x.photo, x.name)}
     <div class="body">
       <div class="spread"><span class="name">${esc(x.name)}</span><span class="price">${money(x.price)}</span></div>
@@ -170,14 +170,16 @@ async function openItem(type, id) {
     <div class="spread" style="margin-top:10px"><h2>${esc(x.name)}</h2><b class="price" style="color:var(--accent);font-size:1.2rem">${money(x.price)}</b></div>
     <p>${esc(x.desc) || '<span class="muted">沒有說明</span>'}</p>
     ${type === 'combo' ? `<p class="muted">內容：${esc(x.contents.map((i) => `${i.name} x ${i.qty}`).join('、'))}</p>` : ''}
+    ${x.soldOut ? `<div class="err">${type === 'combo' ? `套餐內的「${esc(x.contents.filter((i) => i.soldOut).map((i) => i.name).join('、'))}」今日已售完` : '這道餐點今日已售完'}，明天再來吧！</div>` : `
     ${optHtml}
     <label>數量</label>
-    <div class="qty"><button class="ghost" onclick="stepQty(-1)">−</button><b id="dq">1</b><button class="ghost" onclick="stepQty(1)">＋</button></div>
+    <div class="qty"><button class="ghost" onclick="stepQty(-1)">−</button><b id="dq">1</b><button class="ghost" onclick="stepQty(1)">＋</button></div>`}
     <h3 style="margin-top:18px">顧客評價</h3>
     ${r ? `<div class="row" style="gap:14px;margin:8px 0"><div style="font-size:2rem;font-weight:800">${r.avg.toFixed(1)}</div><div><div class="stars">${starText(r.avg)}</div><div class="muted">${r.count} 則評價</div></div></div>
       ${[5, 4, 3, 2, 1, 0].map((s) => `<div class="dist"><span>${s} 星</span><div class="bar"><i style="width:${(r.dist[s] / r.count) * 100}%"></i></div><span>${r.dist[s]}</span></div>`).join('')}
       <div id="comments" style="margin-top:8px"></div>` : '<p class="muted">尚無評價</p>'}`;
-  $('#itemFoot').innerHTML = `<button class="ghost" onclick="dlgItem.close()">關閉</button><button id="addBtn" onclick="addFromDialog()">加入訂單</button>`;
+  $('#itemFoot').innerHTML = `<button class="ghost" onclick="dlgItem.close()">關閉</button>`
+    + (x.soldOut ? '<button disabled>今日售完</button>' : '<button id="addBtn" onclick="addFromDialog()">加入訂單</button>');
   $$('#itemBody .opt-group').forEach((g) => g.addEventListener('change', (e) => {
     if (g.dataset.type === 'maybe' && e.target.checked) $$('input', g).forEach((i) => { if (i !== e.target) i.checked = false; });
     updDlgPrice();
@@ -191,6 +193,7 @@ async function openItem(type, id) {
 }
 function stepQty(d) { dlgQty = Math.min(20, Math.max(1, dlgQty + d)); $('#dq').textContent = dlgQty; updDlgPrice(); }
 function addFromDialog() {
+  if (dlgCtx.x.soldOut) return;
   const line = dlgLine();
   const key = `${line.type}:${line.ref}:${JSON.stringify(line.choices || line.parts)}`;
   const hit = cart.find((c) => c.key === key);
@@ -211,7 +214,10 @@ function pickupSlots() {
   return out;
 }
 function renderCart() {
-  cart = cart.filter((c) => lineInfo(c));   // 下架的品項自動移除
+  // 下架的品項自動移除；今日售完的品項也移除並提示顧客
+  const gone = cart.filter((c) => lineInfo(c) && lineInfo(c).soldOut).map((c) => lineInfo(c).name);
+  cart = cart.filter((c) => lineInfo(c) && !lineInfo(c).soldOut);
+  if (gone.length) toast(`「${[...new Set(gone)].join('、')}」今日已售完，已從訂單移除`, 'bad');
   const sub = subtotal();
   const slots = pickupSlots();
   const prevPick = $('#pickSel')?.value;

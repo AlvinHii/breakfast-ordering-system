@@ -123,6 +123,12 @@ header.top nav button.on { background: #fff; color: var(--color-primary); border
 .price, .card .price { color: var(--color-primary); font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; }
 .badge { position: absolute; top: 10px; left: 10px; background: var(--color-yolk); color: var(--color-fg); font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: var(--radius-pill); box-shadow: 0 2px 6px rgba(120, 72, 20, .2); }
 .stars { color: var(--color-yolk); letter-spacing: 1px; }
+/* 今日售完：照片變灰、價格刪除線，仍可點開看評價 */
+.badge { z-index: 1; }   /* 售完時照片半透明，標籤要疊在照片上面 */
+.badge.badge-sold { background: var(--color-fg); color: #fff; }
+.card.sold-out .ph { filter: grayscale(1); opacity: .55; }
+.card.sold-out .name, .card.sold-out .price { color: var(--color-muted-fg); }
+.card.sold-out .price { text-decoration: line-through; }
 
 /* ---------- 側欄 / 面板 ---------- */
 .panel { background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-card); }

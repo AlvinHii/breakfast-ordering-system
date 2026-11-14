@@ -200,6 +200,8 @@ function refund(o, { deductEarned = false } = {}) {
   if (delta) { u.points = Math.max(0, u.points + delta); emitUser(u); }
 }
 function getOrder(id) { return db.orders.find((o) => o.id === Number(id)) || fail(404, '找不到訂單'); }
+// 今日售完：soldOutDate 等於今天（台北時區）才算售完，隔天自動恢復，不用老闆手動改回來
+const isSoldOut = (m, today = taipeiNow().date) => !!m && m.soldOutDate === today;
 
 // 檢查顧客選的客製選項，算出加價和要印在訂單上的文字
 function resolveChoices(m, picked) {
@@ -327,10 +329,11 @@ route('GET', '/api/menu', () => {
   const popular = sales.filter((s) => s.qty > 0).sort((a, b) => b.qty - a.qty).slice(0, 3).map((s) => s.ref);
   return {
     shop: st,
-    menu: db.menu.filter((m) => m.available),
-    combos: db.combos.filter((c) => c.available).map((c) => ({
-      ...c, contents: c.items.map((i) => { const m = db.menu.find((x) => x.id === i.ref) || {}; return { ...i, name: m.name || '?', groups: m.groups || [] }; }),
-    })),
+    menu: db.menu.filter((m) => m.available).map((m) => ({ ...m, soldOut: isSoldOut(m, st.date) })),
+    combos: db.combos.filter((c) => c.available).map((c) => {
+      const contents = c.items.map((i) => { const m = db.menu.find((x) => x.id === i.ref) || {}; return { ...i, name: m.name || '?', groups: m.groups || [], soldOut: isSoldOut(m, st.date) }; });
+      return { ...c, contents, soldOut: contents.some((x) => x.soldOut) };   // 套餐內任一項售完，整個套餐就不能點
+    }),
     ratings: ratingSummary(),
     popular,
   };
@@ -359,7 +362,7 @@ route('POST', '/api/orders', (c) => {
       let extra = 0; const notes = []; const parts = [];
       cb.items.forEach((ci, k) => {
         const m = db.menu.find((x) => x.id === ci.ref);
-        if (!m || !m.available) fail(400, `套餐「${cb.name}」裡的${m ? `「${m.name}」` : '餐點'}目前售完`);
+        if (!m || !m.available || isSoldOut(m, st.date)) fail(400, `套餐「${cb.name}」裡的${m ? `「${m.name}」` : '餐點'}目前售完`);
         const r = resolveChoices(m, sent[k]);
         extra += r.extra * ci.qty;
         parts.push(r.choices);
@@ -368,6 +371,7 @@ route('POST', '/api/orders', (c) => {
       return { type: 'combo', ref: cb.id, name: cb.name, price: cb.price + extra, qty, note: notes.join('；'), parts };
     }
     const m = db.menu.find((x) => x.id === Number(it.ref) && x.available) || fail(400, '餐點不存在或已下架');
+    if (isSoldOut(m, st.date)) fail(400, `「${m.name}」今日已售完`);
     const r = resolveChoices(m, it.choices);
     return { type: 'item', ref: m.id, name: m.name, price: m.price + r.extra, qty, note: r.note, choices: r.choices };
   });
@@ -546,6 +550,12 @@ route('POST', '/api/boss/menu', (c) => {
 route('PUT', '/api/boss/menu/:id', (c) => {
   const m = db.menu.find((x) => x.id === Number(c.params.id)) || fail(404, '找不到餐點');
   Object.assign(m, readItem(c.body)); save(); emitMenu(); return m;
+}, 'boss');
+route('POST', '/api/boss/menu/:id/soldout', (c) => {
+  const m = db.menu.find((x) => x.id === Number(c.params.id)) || fail(404, '找不到餐點');
+  if (typeof c.body.soldOut !== 'boolean') fail(400, 'soldOut 需為 true 或 false');
+  m.soldOutDate = c.body.soldOut ? taipeiNow().date : '';
+  save(); emitMenu(); return m;
 }, 'boss');
 route('DELETE', '/api/boss/menu/:id', (c) => {
   const id = Number(c.params.id);
