@@ -306,9 +306,59 @@ function renderOrders() {
         ${o.status === '待接單' ? `<button class="ghost" onclick="cancelOrder(${o.id})">取消訂單</button>` : ''}
         ${['製作完成', '已取餐'].includes(o.status) && !o.rated ? `<button onclick="openRate(${o.id})">評價餐點</button>` : ''}
         ${o.rated ? '<span class="muted">已評價，謝謝！</span>' : ''}
+        <button class="secondary" onclick="reorder(${o.id})">再點一次</button>
       </div>
     </div>`).join('') : '<div class="empty">還沒有訂單</div>';
 }
+// ─────────── 再點一次 ───────────
+// 依目前菜單整理舊訂單的選項：已不存在的選項拿掉；必選群組沒有有效選項時改用第一個並提醒顧客
+function fitPicks(groups, old, note = '') {
+  let src = old && typeof old === 'object' ? old : null;
+  if (!src) {
+    // 舊版訂單只存了選項文字（例如「去冰」），用文字比對回目前的選項
+    const words = String(note).split(/[、；：]/).map((s) => s.replace(/\+\d+$/, '').trim());
+    src = {};
+    for (const g of groups || []) { const hit = g.choices.filter((c) => words.includes(c.label)).map((c) => c.label); if (hit.length) src[g.name] = hit; }
+  }
+  const out = {}; let changed = Object.keys(src).some((k) => !(groups || []).some((g) => g.name === k));
+  for (const g of groups || []) {
+    let keep = (src[g.name] || []).filter((label) => g.choices.some((c) => c.label === label));
+    if (keep.length !== (src[g.name] || []).length) changed = true;
+    if (g.type !== 'many') keep = keep.slice(0, 1);
+    if (g.type === 'one' && !keep.length) { keep = [g.choices[0].label]; changed = true; }
+    if (keep.length) out[g.name] = keep;
+  }
+  return { picks: out, changed };
+}
+function reorder(id) {
+  const o = myOrders.find((x) => x.id === id); if (!o) return;
+  const added = [], skipped = [], changed = [];
+  for (const l of o.items) {
+    const x = l.type === 'combo' ? findCombo(l.ref) : findMenu(l.ref);
+    if (!x) { skipped.push(`${l.name}（已下架）`); continue; }
+    if (x.soldOut) { skipped.push(`${x.name}（今日售完）`); continue; }
+    let line, diff = false;
+    if (l.type === 'combo') {
+      const parts = x.contents.map((ci, k) => { const r = fitPicks(ci.groups, (l.parts || [])[k]); diff = diff || r.changed; return r.picks; });
+      line = { type: 'combo', ref: x.id, parts };
+    } else {
+      const r = fitPicks(x.groups, l.choices, l.note); diff = r.changed;
+      line = { type: 'item', ref: x.id, choices: r.picks };
+    }
+    const key = `${line.type}:${line.ref}:${JSON.stringify(line.choices || line.parts)}`;
+    const hit = cart.find((c) => c.key === key);
+    if (hit) hit.qty = Math.min(20, hit.qty + l.qty); else cart.push({ ...line, key, qty: Math.min(20, l.qty) });
+    added.push(x.name);
+    if (diff) changed.push(x.name);
+  }
+  if (!added.length) { toast(`這筆訂單的餐點目前都無法點購：${skipped.join('、')}`, 'bad'); return; }
+  show('menu');
+  toast(`已將 ${added.length} 項加入訂單，價格以目前菜單為準`, 'ok');
+  if (skipped.length) toast(`未加入：${skipped.join('、')}`, 'bad');
+  if (changed.length) toast(`「${[...new Set(changed)].join('、')}」的選項已變更，請在訂單中確認`);
+  if (window.matchMedia('(max-width: 820px)').matches) $('#cart').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 async function cancelOrder(id) {
   if (!confirm('確定要取消這筆訂單嗎？')) return;
   try { await api(`/api/orders/${id}/cancel`, { method: 'POST', body: {} }); toast('訂單已取消'); loadOrders(); } catch (e) { toast(e.message, 'bad'); }
