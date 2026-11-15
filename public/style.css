@@ -176,7 +176,7 @@ dialog .hero { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius
 .order .num { font-family: var(--font-num); font-size: 2rem; font-weight: 800; color: var(--color-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .order.flash { animation: flash 1s ease-in-out 4; }
 @keyframes flash { 0%,100% { background: #fff; } 50% { background: var(--color-yolk-soft); } }
-.status { display: inline-block; padding: 3px 12px; border-radius: var(--radius-pill); font-size: .82rem; font-weight: 700; }
+.status { display: inline-block; padding: 3px 12px; border-radius: var(--radius-pill); font-size: .82rem; font-weight: 700; white-space: nowrap; }
 .st-pending { background: var(--color-yolk-soft); color: #92400E; }
 .st-accepted { background: var(--color-info-soft); color: var(--color-info); }
 .st-ready { background: var(--color-fresh-soft); color: var(--color-fresh); }

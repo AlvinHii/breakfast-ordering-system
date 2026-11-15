@@ -279,22 +279,95 @@ sequenceDiagram
 
 | 編號 | 畫面 | 說明 |
 | --- | --- | --- |
-| UI-01 | 〔插入截圖〕登入與註冊 | 帳號密碼登入、註冊切換、GitHub／Google 登入按鈕；錯誤訊息顯示於對話框內 |
-| UI-02 | 〔插入截圖〕菜單頁 | 頂部顯示營業狀態；餐點依分類以卡片呈現，含照片、價格、評分與「本月熱門」標籤 |
-| UI-03 | 〔插入截圖〕品項與套餐對話框 | 選項群組以晶片按鈕呈現（單選、可不選、複選，加價顯示在選項上）；套餐逐項列出內含餐點的選項；「加入訂單」按鈕即時顯示含加價金額；下方為星等分布與評論 |
-| UI-04 | 〔插入截圖〕購物車與確認視窗 | 一頁式購物車：數量加減、取餐時間（下單後至少 15 分鐘，每 5 分鐘一格）、點數折抵、小計與總計；送出前確認視窗列出明細；訂單備註輸入框（顯示字數，確認視窗一併列出） |
-| UI-05 | 〔插入截圖〕我的訂單 | 狀態標籤、進度條、大字取餐序號、拒絕或取消原因；可取消（待接單）或評價；每筆訂單的「再點一次」依目前菜單以 `fitPicks()` 整理選項後加回購物車，略過下架或售完品項並以提示說明（FR-17） |
+| UI-01 | 登入與註冊 | 帳號密碼登入、註冊切換、GitHub／Google 登入按鈕；錯誤訊息顯示於對話框內 |
+| UI-02 | 菜單頁 | 頂部顯示營業狀態；餐點依分類以卡片呈現，含照片、價格、評分與「本月熱門」標籤 |
+| UI-03 | 品項與套餐對話框 | 選項群組以晶片按鈕呈現（單選、可不選、複選，加價顯示在選項上）；套餐逐項列出內含餐點的選項；「加入訂單」按鈕即時顯示含加價金額；下方為星等分布與評論 |
+| UI-04 | 購物車與確認視窗 | 一頁式購物車：數量加減、取餐時間（下單後至少 15 分鐘，每 5 分鐘一格）、點數折抵、小計與總計；送出前確認視窗列出明細；訂單備註輸入框（顯示字數，確認視窗一併列出） |
+| UI-05 | 我的訂單 | 狀態標籤、進度條、大字取餐序號、拒絕或取消原因；可取消（待接單）或評價；每筆訂單的「再點一次」依目前菜單以 `fitPicks()` 整理選項後加回購物車，略過下架或售完品項並以提示說明（FR-17） |
 
 ### 4.3 老闆後台畫面
 
 | 編號 | 畫面 | 說明 |
 | --- | --- | --- |
-| UI-06 | 〔插入截圖〕訂單看板 | 待接單、製作清單、待取餐、今日已結束；新訂單提示音與閃爍；10 分鐘內未接單顯示紅色提醒 |
-| UI-07 | 〔插入截圖〕餐點、套餐與營業設定 | 餐點表單含照片上傳與選項群組編輯（群組名稱、選擇方式、選項與加價）；套餐表單顯示單點合計；設定頁含營業時間、接單開關、點數門檻 |
-| UI-08 | 〔插入截圖〕銷售統計 | 今日／本月／全部切換；營業額、有效訂單數、客單價、點數折抵、各分類銷售排行、評價表 |
-| UI-09 | 〔插入截圖〕手機版介面 | 顧客頁兩欄菜單與底部購物車列；後台表格改卡片、分頁列可滑動 |
-| UI-10 | 〔插入截圖〕歷史報表 | 日期區間與快捷按鈕（近 7 天、近 30 天、本月、上月）；摘要數字、每日營業額長條、訂單明細表；右上角匯出 CSV |
-| UI-11 | 〔插入截圖〕今日售完 | 後台餐點列「今日售完／恢復供應」按鈕與狀態標籤、套餐「含售完餐點」；顧客菜單卡片灰階並標示「今日售完」，對話框停用加入 |
+| UI-06 | 訂單看板 | 待接單、製作清單、待取餐、今日已結束；新訂單提示音與閃爍；10 分鐘內未接單顯示紅色提醒 |
+| UI-07 | 餐點、套餐與營業設定 | 餐點表單含照片上傳與選項群組編輯（群組名稱、選擇方式、選項與加價）；套餐表單顯示單點合計；設定頁含營業時間、接單開關、點數門檻 |
+| UI-08 | 銷售統計 | 今日／本月／全部切換；營業額、有效訂單數、客單價、點數折抵、各分類銷售排行、評價表 |
+| UI-09 | 手機版介面 | 顧客頁兩欄菜單與底部購物車列；後台表格改卡片、分頁列可滑動 |
+| UI-10 | 歷史報表 | 日期區間與快捷按鈕（近 7 天、近 30 天、本月、上月）；摘要數字、每日營業額長條、訂單明細表；右上角匯出 CSV |
+| UI-11 | 今日售完 | 後台餐點列「今日售完／恢復供應」按鈕與狀態標籤、套餐「含售完餐點」；顧客菜單卡片灰階並標示「今日售完」，對話框停用加入 |
+
+### 4.4 畫面截圖
+
+以下截圖以示範資料拍攝（2026/11/15，Iteration 3 版本）。
+
+#### UI-01 登入與註冊
+
+以示範帳號畫面為例：帳號密碼登入、切換註冊，下方為 GitHub／Google 登入（未設定時停用）。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-01-login.jpg" alt="登入與註冊對話框">
+
+#### UI-02 菜單頁
+
+頂部為營業狀態；餐點依分類以卡片呈現，標示「本月熱門」與平均評分；右側為一頁式購物車。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-02-menu.jpg" alt="顧客菜單頁">
+
+#### UI-03 品項與套餐對話框
+
+早八套餐逐項列出火腿蛋堡與奶茶的選項群組；已選選項以煎蛋橘標示，加入按鈕即時顯示含加價金額。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-03-item-options.jpg" alt="套餐選項對話框">
+
+#### UI-04 購物車與確認視窗
+
+購物車含選項明細、取餐時間、點數折抵與訂單備註（顯示字數）；送出前的確認視窗列出明細、折抵、取餐時間與備註。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-04-cart.jpg" alt="購物車">
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-04-confirm.jpg" alt="確認訂單視窗">
+
+#### UI-05 我的訂單
+
+手機版畫面：狀態標籤、進度條、取餐號碼、訂單備註，以及「取消訂單」「再點一次」按鈕。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-05-my-orders.jpg" alt="我的訂單" width="360">
+
+#### UI-06 訂單看板
+
+待接單、製作清單、待取餐三欄；訂單卡顯示客製明細與備註，可接受、拒絕、標記製作完成與已取餐。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-06-boss-orders.jpg" alt="老闆訂單看板">
+
+#### UI-07 餐點、套餐與營業設定
+
+餐點列表顯示客製選項群組與狀態；編輯餐點時可設定選項群組名稱、選擇方式、選項與加價。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-07-boss-menu.jpg" alt="餐點管理列表">
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-07-item-edit.jpg" alt="編輯餐點對話框">
+
+#### UI-08 銷售統計
+
+今日／本月／全部切換；有效訂單、營業額、客單價、點數折抵，各分類銷售排行與餐點評價表。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-08-stats.jpg" alt="銷售統計">
+
+#### UI-09 手機版介面
+
+顧客頁菜單與底部浮動購物車列；後台表格在窄螢幕改為卡片、分頁列可左右滑動。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-09-mobile-menu.jpg" alt="手機版顧客菜單" width="360">
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-09-boss-mobile.jpg" alt="手機版後台餐點管理" width="360">
+
+#### UI-10 歷史報表
+
+以近 7 天為例：日期區間與快捷按鈕、摘要數字、每日營業額、訂單明細（含備註），右上角匯出 CSV。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-10-history.jpg" alt="歷史訂單與營收報表">
+
+#### UI-11 今日售完
+
+後台將奶茶標記為今日售完後，狀態改為「今日售完」、按鈕變為「恢復供應」；顧客頁含奶茶的早八套餐同步顯示售完（見 UI-09 手機版菜單）。
+
+<img src="https://raw.githubusercontent.com/AlvinHii/breakfast-ordering-system/main/docs/screenshots/ui-11-boss-soldout.jpg" alt="後台今日售完">
 
 ---
 
