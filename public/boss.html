@@ -208,6 +208,7 @@ function orderCard(o, flashId) {
       <div style="text-align:right"><div style="font-size:1.2rem;font-weight:800">${esc(o.pickupTime)}</div><div class="muted">取餐${o.date !== todayStr() ? `（${esc(o.date)}）` : ''}</div></div>
     </div>
     <div style="margin:8px 0;font-size:1.02rem">${o.items.map(lineText).join('<br>')}</div>
+    ${o.remark ? `<div class="remark">備註：${esc(o.remark)}</div>` : ''}
     <div class="spread"><b>合計 ${money(o.total)}</b><span class="muted">${o.pointsUsed ? `點數折抵 ${o.pointsUsed}` : ''}</span></div>
     ${urgency(o)}
     ${o.status === '已拒絕' ? `<div class="muted">拒絕原因：${esc(o.rejectReason)}</div>` : ''}
@@ -443,16 +444,16 @@ function renderHistory() {
     ${h.truncated ? `<p class="muted">訂單太多，只顯示並匯出最新的 ${h.orders.length} 筆，請縮小日期區間。</p>` : ''}
     ${h.orders.length ? `<table class="rtable hist-table"><tr><th>日期</th><th>序號</th><th>顧客</th><th>取餐</th><th>內容</th><th>實收</th><th>狀態</th></tr>
       ${h.orders.map((o) => `<tr><td data-label="日期">${esc(o.date)}</td><td class="c-main"><b>${o.number ? esc(o.number) : `#${o.id}`}</b></td><td data-label="顧客">${esc(o.customerName)}</td>
-        <td data-label="取餐">${esc(o.pickupTime)}</td><td data-label="內容" class="muted">${o.items.map(lineText).join('<br>')}</td>
+        <td data-label="取餐">${esc(o.pickupTime)}</td><td data-label="內容" class="muted">${o.items.map(lineText).join('<br>')}${o.remark ? `<div>備註：${esc(o.remark)}</div>` : ''}</td>
         <td data-label="實收" class="price">${money(o.total)}${o.pointsUsed ? `<div class="muted">折抵 ${o.pointsUsed}</div>` : ''}</td><td data-label="狀態">${statusTag(o.status)}</td></tr>`).join('')}</table>`
     : '<div class="empty">這段期間沒有訂單</div>'}`;
 }
 // CSV：加上 BOM 讓 Excel 正確顯示中文；開頭是 = + - @ 的文字前面加單引號，避免被試算表當成公式
 const csvCell = (v) => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
 function historyCsv() {
-  const head = ['日期', '訂單編號', '取餐序號', '顧客', '取餐時間', '狀態', '品項', '小計', '點數折抵', '實收', '獲得點數', '下單時間'];
+  const head = ['日期', '訂單編號', '取餐序號', '顧客', '取餐時間', '狀態', '品項', '備註', '小計', '點數折抵', '實收', '獲得點數', '下單時間'];
   const rows = hist.orders.map((o) => [o.date, o.id, o.number || '', o.customerName, o.pickupTime, o.status,
-    o.items.map((l) => `${l.name}${l.note ? `（${l.note}）` : ''} x ${l.qty}`).join('；'), o.subtotal, o.pointsUsed, o.total, o.pointsEarned, o.createdAt]);
+    o.items.map((l) => `${l.name}${l.note ? `（${l.note}）` : ''} x ${l.qty}`).join('；'), o.remark || '', o.subtotal, o.pointsUsed, o.total, o.pointsEarned, o.createdAt]);
   return '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
 }
 $('#histCsv').onclick = () => {

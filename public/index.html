@@ -63,6 +63,8 @@
 <script src="/common.js"></script>
 <script>
 let me = null, data = null, cart = [], myOrders = [], es = null, loginMode = 'login', rateOrder = null;
+let remark = '';             // 訂單備註，重畫購物車時保留
+const REMARK_MAX = 50;
 
 // ─────────── 初始化 ───────────
 async function init() {
@@ -223,6 +225,8 @@ function renderCart() {
   const prevPick = $('#pickSel')?.value;
   const maxPts = me && me.role === 'customer' ? Math.min(me.points, sub) : 0;
   const prevPts = Math.min(Number($('#ptsIn')?.value || 0), maxPts);
+  const ae = document.activeElement;
+  const typingRemark = ae && ae.id === 'remarkIn' ? [ae.selectionStart, ae.selectionEnd] : null;
   $('#cart').innerHTML = `
     <h2 style="font-size:1.05rem;margin-bottom:6px">我的訂單</h2>
     ${cart.length ? cart.map((c, i) => { const x = lineCalc(c); return `
@@ -232,10 +236,15 @@ function renderCart() {
     <label>預定取餐時間</label>
     ${slots.length ? `<select id="pickSel">${slots.map((t) => `<option ${t === prevPick ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<div class="muted">${esc(data.shop.reason)}</div>`}
     ${maxPts > 0 ? `<label>使用點數折抵（1 點 = 1 元，可用 ${maxPts} 點）</label><input id="ptsIn" type="number" min="0" max="${maxPts}" value="${prevPts}" oninput="renderTotals()">` : ''}
+    ${cart.length ? `<label for="remarkIn">訂單備註（選填）</label>
+    <input id="remarkIn" maxlength="${REMARK_MAX}" placeholder="例如：不要切、袋子分開裝" value="${esc(remark)}" oninput="remark = this.value; $('#remarkCount').textContent = this.value.length" aria-describedby="remarkHelp">
+    <div class="muted remark-help" id="remarkHelp"><span>店家接單時會看到</span><span><span id="remarkCount">${remark.length}</span>/${REMARK_MAX}</span></div>` : ''}
     <div id="totals"></div>
     <button style="width:100%" id="btnSubmit" ${cart.length && slots.length ? '' : 'disabled'}>${me ? '送出訂單' : '登入後送出訂單'}</button>
     <div class="err hidden" id="cartErr"></div>`;
   $('#btnSubmit').onclick = review;
+  // 購物車每分鐘會重畫一次；顧客正在打備註時，把游標放回原位
+  if (typingRemark) { const r = $('#remarkIn'); if (r) { r.focus(); r.setSelectionRange(typingRemark[0], typingRemark[1]); } }
   renderTotals();
   const n = cart.reduce((s, c) => s + c.qty, 0);
   $('#cartBar').classList.toggle('show', n > 0 && !$('#view-menu').classList.contains('hidden'));
@@ -258,7 +267,9 @@ function review() {
   $('#confirmBody').innerHTML = cart.map((c) => { const x = lineCalc(c); return `<div class="line"><span>${esc(x.name)} x ${c.qty}${x.note ? `<div class="muted">${esc(x.note)}</div>` : ''}</span><span>${money(x.unit * c.qty)}</span></div>`; }).join('')
     + (used ? `<div class="line"><span>點數折抵</span><span>−${money(used)}</span></div>` : '')
     + `<div class="total"><span>合計</span><span>${money(sub - used)}</span></div>`
-    + `<p>預定取餐時間：<b>${esc($('#pickSel').value)}</b></p><p class="muted">送出後需等待店家接單，接單後會產生取餐號碼並通知你。</p>`;
+    + `<p>預定取餐時間：<b>${esc($('#pickSel').value)}</b></p>`
+    + (remark.trim() ? `<p>訂單備註：${esc(remark.trim())}</p>` : '')
+    + `<p class="muted">送出後需等待店家接單，接單後會產生取餐號碼並通知你。</p>`;
   $('#dlgConfirm').showModal();
 }
 $('#cBack').onclick = () => $('#dlgConfirm').close();
@@ -266,8 +277,8 @@ $('#cOk').onclick = async () => {
   $('#cOk').disabled = true;
   askNotifyPermission();
   try {
-    await api('/api/orders', { method: 'POST', body: { items: cart.map(({ type, ref, choices, parts, qty }) => ({ type, ref, choices, parts, qty })), pickupTime: $('#pickSel').value, usePoints: usedPoints() } });
-    cart = [];
+    await api('/api/orders', { method: 'POST', body: { items: cart.map(({ type, ref, choices, parts, qty }) => ({ type, ref, choices, parts, qty })), pickupTime: $('#pickSel').value, usePoints: usedPoints(), remark: remark.trim() } });
+    cart = []; remark = '';
     $('#dlgConfirm').close();
     toast('訂購成功！等待店家接單', 'ok');
     await loadOrders();
@@ -299,6 +310,7 @@ function renderOrders() {
       </div>
       ${progress(o.status)}
       <div style="margin-top:8px">${o.items.map(lineText).join('<br>')}</div>
+      ${o.remark ? `<div class="remark">備註：${esc(o.remark)}</div>` : ''}
       <div class="spread" style="margin-top:6px"><b>合計 ${money(o.total)}</b><span class="muted">${o.pointsUsed ? `折抵 ${o.pointsUsed} 點　` : ''}${o.pointsEarned ? `獲得 ${o.pointsEarned} 點` : ''}</span></div>
       ${o.status === '已拒絕' ? `<div class="err">店家拒絕：${esc(o.rejectReason)}</div>` : ''}
       ${o.status === '已取消' && o.cancelReason ? `<div class="err">${esc(o.cancelReason)}${o.pointsUsed ? '，使用的點數已退回' : ''}</div>` : ''}

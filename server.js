@@ -376,6 +376,9 @@ route('POST', '/api/orders', (c) => {
     return { type: 'item', ref: m.id, name: m.name, price: m.price + r.extra, qty, note: r.note, choices: r.choices };
   });
 
+  // 訂單備註（選填）：換行改成空白，最多 50 字
+  const remark = str(String(c.body.remark ?? '').replace(/\s+/g, ' '), 50, '備註', { required: false });
+
   const pmin = toMin(c.body.pickupTime);
   if (pmin === null) fail(400, '請選擇取餐時間');
   if (pmin < st.now + MIN_LEAD) fail(400, `取餐時間至少需間隔${MIN_LEAD}分鐘`);
@@ -389,7 +392,7 @@ route('POST', '/api/orders', (c) => {
 
   const now = new Date().toISOString();
   const o = {
-    id: nextId('order'), userId: c.user.id, customerName: c.user.name, items: lines,
+    id: nextId('order'), userId: c.user.id, customerName: c.user.name, items: lines, remark,
     subtotal, pointsUsed: usePoints, total: subtotal - usePoints, pointsEarned: 0,
     pickupTime: toHHMM(pmin), date: st.date, status: S.PENDING, number: null,
     rejectReason: '', rated: false, createdAt: now, history: [{ status: S.PENDING, at: now }],
