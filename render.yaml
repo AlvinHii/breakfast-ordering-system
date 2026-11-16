@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: breakfast-ordering-system
+    runtime: node
+    branch: feature/postgresql-integration
+    region: singapore
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 24.12.0
+      - key: NODE_ENV
+        value: production
+      - key: DB_SCHEMA
+        value: breakfast_shop
+      - key: DATABASE_URL
+        sync: false
+      - key: BOSS_PASSWORD
+        sync: false

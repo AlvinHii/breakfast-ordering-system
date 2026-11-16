@@ -21,10 +21,10 @@ test('PostgreSQL migration, order lifecycle, atomicity and restart persistence',
   const imported = new Storage({ ...config, schema: importedSchema });
   const processes = new Set();
   let app;
-  async function start(targetSchema = schema, legacyFile = path.join(scratch, 'absent.json')) {
+  async function start(targetSchema = schema, legacyFile = path.join(scratch, 'absent.json'), overrides = {}) {
     const child = fork(path.join(root, 'server.js'), [], {
       cwd: root,
-      env: { ...process.env, PORT: '0', DB_SCHEMA: targetSchema, BOSS_PASSWORD: 'testboss1234', LEGACY_DATA_FILE: legacyFile, UPLOAD_DIR: path.join(scratch, 'uploads') },
+      env: { ...process.env, NODE_ENV: 'test', PORT: '0', DB_SCHEMA: targetSchema, BOSS_PASSWORD: 'testboss1234', LEGACY_DATA_FILE: legacyFile, UPLOAD_DIR: path.join(scratch, 'uploads'), ...overrides },
       execArgv: ['--require', path.join(__dirname, 'clock.cjs')],
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
@@ -55,7 +55,7 @@ test('PostgreSQL migration, order lifecycle, atomicity and restart persistence',
     return { value, cookie: response.headers.get('set-cookie')?.split(';')[0] };
   }
   t.after(async () => {
-    for (const child of processes) { const exit = once(child, 'exit'); child.kill(); await exit; }
+    for (const child of processes) { if (child.exitCode !== null || child.signalCode) continue; const exit = once(child, 'exit'); child.kill(); await exit; }
     // 僅刪除這次測試自行建立、名稱已驗證的 schema。
     for (const name of [schema, importedSchema]) {
       assert.match(name, /^test_breakfast_[a-f0-9]{12}(_import)?$/);
@@ -87,6 +87,20 @@ test('PostgreSQL migration, order lifecycle, atomicity and restart persistence',
     await api('/api/boss/settings', { cookie: boss, method: 'PUT', body: { open: '00:00', close: '23:59', accepting: true, pointRate: 30 } });
     const count = await storage.pool.query(`SELECT count(*)::int AS n FROM "${schema}".menu`);
     assert.equal(count.rows[0].n, 6);
+  });
+  await t.test('uploaded photos persist in PostgreSQL across server restarts', async () => {
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2uoAAAAASUVORK5CYII=', 'base64');
+    await api('/api/boss/upload', { cookie: customer, body: { dataUrl: 'data:image/png;base64,' + bytes.toString('base64') }, status: 403 });
+    const photo = (await api('/api/boss/upload', { cookie: boss, body: { dataUrl: 'data:image/png;base64,' + bytes.toString('base64') } })).value;
+    assert.equal(fs.existsSync(path.join(scratch, 'uploads', photo.url.split('/').pop())), false);
+    await stop(app);
+    app = await start();
+    const response = await fetch(app.url + photo.url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    const health = await api('/healthz');
+    assert.equal(health.value.status, 'ok');
   });
   const orderBody = { items: [{ type: 'item', ref: 4, qty: 3, choices: { '冰塊': ['少冰'], '甜度': ['無糖'] } }], pickupTime: '09:00', usePoints: 0, remark: '飲料分開裝' };
   await t.test('sold-out state survives restart and blocks items and combos', async () => {
@@ -205,7 +219,29 @@ test('PostgreSQL migration, order lifecycle, atomicity and restart persistence',
     assert.equal(orders.length, 2);
     assert.equal(orders[0].remark, '');
     const version = await imported.pool.query(`SELECT value FROM "${importedSchema}".system_state WHERE key='schema_version'`);
-    assert.equal(version.rows[0].value, 2);
+    assert.equal(version.rows[0].value, 3);
     await stop(upgraded);
+  });
+  await t.test('production replaces public admin password, disables demo login and sends secure cookies', async () => {
+    await imported.transaction(async client => {
+      const previous = await imported.load(client);
+      const next = structuredClone(previous);
+      const user = next.users.find(user => user.role === 'boss');
+      user.salt = crypto.randomBytes(16).toString('hex');
+      user.hash = crypto.scryptSync('boss1234', user.salt, 32).toString('hex');
+      await imported.save(client, next, previous);
+    });
+    const production = await start(importedSchema, path.join(scratch, 'absent.json'), {
+      NODE_ENV: 'production', BOSS_PASSWORD: 'ProductionTestPassword1234', RENDER_EXTERNAL_URL: 'https://test.example',
+    });
+    await api('/api/login', { instance: production, body: { username: 'boss', password: 'boss1234' }, status: 401 });
+    await api('/api/login', { instance: production, body: { username: 'demo', password: 'demo1234' }, status: 401 });
+    const response = await fetch(production.url + '/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'boss', password: 'ProductionTestPassword1234' }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('set-cookie'), /; Secure/);
+    await stop(production);
   });
 });

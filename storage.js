@@ -71,8 +71,8 @@ class Storage {
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(fs.readFileSync(path.join(__dirname, 'database', 'schema.sql'), 'utf8'));
       const { rows } = await client.query("SELECT value FROM system_state WHERE key = 'schema_version'");
-      if (rows.length && ![1, 2].includes(rows[0].value)) throw new Error('資料庫版本不相容');
-      await client.query("INSERT INTO system_state(key, value) VALUES ('schema_version', '2') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+      if (rows.length && ![1, 2, 3].includes(rows[0].value)) throw new Error('資料庫版本不相容');
+      await client.query("INSERT INTO system_state(key, value) VALUES ('schema_version', '3') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
     });
   }
   async load(client) {
@@ -126,5 +126,12 @@ class Storage {
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [JSON.stringify(state.seq)]);
   }
   async close() { await this.pool.end(); }
+  async putPhoto(client, name, contentType, data) {
+    await client.query('INSERT INTO photos(name, content_type, data) VALUES ($1,$2,$3) ON CONFLICT(name) DO NOTHING', [name, contentType, data]);
+  }
+  async getPhoto(name) {
+    const { rows } = await this.pool.query(`SELECT content_type, data FROM "${this.schema}".photos WHERE name=$1`, [name]);
+    return rows[0] || null;
+  }
 }
 module.exports = { Storage };

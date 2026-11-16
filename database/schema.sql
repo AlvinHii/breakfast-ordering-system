@@ -52,3 +52,11 @@ CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
 -- v2：相容組長 Iteration 3 的今日售完與訂單備註；既有 v1 資料不重建。
 ALTER TABLE menu ADD COLUMN IF NOT EXISTS sold_out_date TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS remark TEXT NOT NULL DEFAULT '';
+
+-- v3：照片存在雲端資料庫，不依賴部署主機的暫存磁碟。
+CREATE TABLE IF NOT EXISTS photos (
+  name TEXT PRIMARY KEY CHECK (name ~ '^[a-f0-9]{24}\.(png|jpg|webp|gif)$'),
+  content_type TEXT NOT NULL CHECK (content_type IN ('image/png','image/jpeg','image/webp','image/gif')),
+  data BYTEA NOT NULL CHECK (octet_length(data) BETWEEN 1 AND 2097152),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -1,5 +1,7 @@
 # PostgreSQL 實作說明
 
+> v3 公開部署更新（2026/11/16）：照片已改存 PostgreSQL `photos` 表，不依賴主機暫存檔案；保留單張 2 MB 上限並自動匯入本機舊照片。共 9 張資料表。正式環境停用預設 demo 登入，替換老闆公開預設密碼，並設定 HTTPS Secure cookie。部署以 [DEPLOYMENT.md](DEPLOYMENT.md) 為準；下方 v1/v2 文字保留先前整合紀錄。
+
 ## 本次變更
 
 保留原顧客與老闆前端、API 網址及訂單流程。以 PostgreSQL 取代 JSON 檔案及尚未交付的 SQLite 初稿。`config.js` 讀取專案資料夾 `.env`，`storage.js` 處理 PostgreSQL 連線、交易及資料對應，`database/schema.sql` 定義版本 1 的資料表。

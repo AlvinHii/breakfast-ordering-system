@@ -1,6 +1,6 @@
 # 北寧路早餐店系統（PostgreSQL 版）
 
-需要 **Node.js 24 以上**。資料存於 PostgreSQL（支援 Neon），使用 `pg` 連線套件；照片仍存於 `uploads/`。本版整合資料庫並保留歷史報表、今日售完、再點一次與訂單備註。
+需要 **Node.js 24 以上**。資料與上傳照片存於 PostgreSQL（支援 Neon），使用 `pg` 連線套件。本版整合資料庫並保留歷史報表、今日售完、再點一次與訂單備註。免費公開展示部署見 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ## 執行（Windows PowerShell）
 
@@ -140,5 +140,5 @@ node server.js
 
 - `npm test`：使用隔離的 PostgreSQL 測試 schema，測完自動清除測試資料。
 - `npm run test:pooled`：使用 Neon 對應的池化網址重跑相同測試，不改寫 `.env`。
-- 網站仍需另外部署，照片需持久磁碟或物件儲存；目前 SSE 通知先以一個持續運行的 Node.js 服務提供。
+- 照片已改存 PostgreSQL，不需要付費磁碟；`render.yaml` 提供免費 Web Service 設定。SSE 通知先以一個 Node.js 服務提供，免費方案休眠期間不會持續處理訂單。
 - 此版保留原路由的資料快照結構並只更新變動資料列；尚未完成大量訂單的分頁 SQL 及跨服務事件通知。
