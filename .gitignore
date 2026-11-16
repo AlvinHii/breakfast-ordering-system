@@ -7,3 +7,8 @@ uploads/*
 .claude/
 node_modules/
 .env
+.env.*
+!.env.example
+data.json.tmp
+*.sqlite*
+work/

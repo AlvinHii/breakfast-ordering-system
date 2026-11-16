@@ -1,17 +1,19 @@
 'use strict';
-// 北寧路早餐店系統 — 完整版（不含資料庫：資料存在 data.json）
-// 只用 Node.js 內建模組，不需要 npm install。第三方登入需要 Node 18 以上（使用內建 fetch）。
+// 北寧路早餐店系統 — PostgreSQL 版，需要 Node.js 24 以上。
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { databaseConfig, databaseError } = require('./config');
+const { Storage } = require('./storage');
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = process.env.PORT === undefined ? 3000 : Number(process.env.PORT);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const ROOT = __dirname;
-const DATA_FILE = path.join(ROOT, 'data.json');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
+const DATA_FILE = path.resolve(process.env.LEGACY_DATA_FILE || path.join(ROOT, 'data.json'));
+const storage = new Storage(databaseConfig());
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(ROOT, 'uploads'));
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const MAX_BODY = 4 * 1024 * 1024;          // 4 MB（含 base64 照片）
 const MAX_PHOTO = 2 * 1024 * 1024;         // 照片解碼後最多 2 MB
@@ -61,12 +63,40 @@ function shopState() {
 
 // ───────────────────────── 資料存取 ─────────────────────────
 let db;
+let dirty = false;
+let pendingEvents = null;
+let stateQueue = Promise.resolve();
 const nextId = (k) => ++db.seq[k];
-// 先寫到暫存檔再改名：就算寫到一半當機，原本的 data.json 也不會壞掉
-function save() {
-  const tmp = DATA_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DATA_FILE);
+// 原路由只需標示變更；真正提交在整個請求成功後統一進行。
+function save() { dirty = true; }
+function withState(action) {
+  const task = stateQueue.then(async () => {
+    let previous;
+    dirty = false;
+    pendingEvents = [];
+    try {
+      const result = await storage.transaction(async client => {
+        db = await storage.load(client);
+        previous = structuredClone(db);
+        const value = await action();
+        if (dirty) await storage.save(client, db, previous);
+        return value;
+      });
+      // 資料提交成功後才推播，失敗時不會通知顧客「已成功」。
+      const events = pendingEvents;
+      pendingEvents = null;
+      for (const event of events) {
+        try { event(); } catch { console.error('已儲存資料，但有一則即時通知無法送出。'); }
+      }
+      return result;
+    } catch (error) {
+      db = previous;
+      pendingEvents = null;
+      throw error;
+    }
+  });
+  stateQueue = task.catch(() => {});
+  return task;
 }
 
 function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
@@ -111,8 +141,20 @@ function seed() {
 }
 
 function load() {
-  if (fs.existsSync(DATA_FILE)) db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  else { seed(); save(); }
+  const firstRun = !db;
+  if (firstRun) {
+    if (fs.existsSync(DATA_FILE)) {
+      db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      console.log('正在匯入舊 data.json；原檔保留不變。');
+    } else seed();
+  }
+  // 舊檔的序號不可小於實際 ID，避免匯入後覆寫既有資料。
+  if (!db.seq) db.seq = {};
+  for (const [key, table] of Object.entries({ user: 'users', menu: 'menu', combo: 'combos', order: 'orders', rating: 'ratings' })) {
+    if (!Array.isArray(db[table])) throw new Error('舊資料缺少必要清單');
+    db.seq[key] = Math.max(Number(db.seq[key]) || 0, ...db[table].map(row => row.id));
+  }
+  if (!db.sessions) db.sessions = {};
   // 舊版資料：options（單一選項清單）自動轉成選項群組
   let migrated = false;
   for (const m of db.menu) {
@@ -123,7 +165,7 @@ function load() {
       migrated = true;
     }
   }
-  if (migrated) save();
+  if (firstRun || migrated) save();
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
@@ -148,7 +190,7 @@ function sessionUser(req) {
   const sid = parseCookies(req).sid;
   const s = sid && db.sessions[sid];
   if (!s) return null;
-  if (s.exp < Date.now()) { delete db.sessions[sid]; return null; }
+  if (s.exp < Date.now()) { delete db.sessions[sid]; save(); return null; }
   return db.users.find((u) => u.id === s.userId) || null;
 }
 function startSession(res, user) {
@@ -179,12 +221,20 @@ const photoPath = (v) => {
 
 // ───────────────────────── 即時推播（Server-Sent Events） ─────────────────────────
 const clients = new Set();
-function push(cl, event, data) { cl.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
-function emitOrder(o) {
-  for (const cl of clients) if (cl.user.role === 'boss' || cl.user.id === o.userId) push(cl, 'order', o);
+function push(cl, event, data) {
+  if (!cl.res.destroyed && !cl.res.writableEnded) cl.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
-function emitUser(u) { for (const cl of clients) if (cl.user.id === u.id) push(cl, 'me', publicUser(u)); }
-function emitMenu() { for (const cl of clients) push(cl, 'menu', {}); }
+function publish(event, data, allowed) {
+  const snapshot = structuredClone(data);
+  const send = () => { for (const cl of clients) if (allowed(cl)) push(cl, event, snapshot); };
+  if (pendingEvents) pendingEvents.push(send); else send();
+}
+function emitOrder(o) {
+  const userId = o.userId;
+  publish('order', o, cl => cl.user.role === 'boss' || cl.user.id === userId);
+}
+function emitUser(u) { const id = u.id; publish('me', publicUser(u), cl => cl.user.id === id); }
+function emitMenu() { publish('menu', {}, () => true); }
 setInterval(() => { for (const cl of clients) cl.res.write(': ping\n\n'); }, 25000).unref();
 
 // ───────────────────────── 訂單邏輯 ─────────────────────────
@@ -237,7 +287,6 @@ function expireOrders() {
   }
   if (changed) save();
 }
-setInterval(expireOrders, 30 * 1000).unref();
 
 // 登入失敗太多次就暫時鎖住（防止有人一直猜密碼）
 const LOGIN_MAX = 5, LOGIN_WINDOW = 10 * 60 * 1000;
@@ -440,11 +489,14 @@ route('POST', '/api/orders/:id/rate', (c) => {
 
 // 即時推播
 route('GET', '/api/events', (c) => {
+  c.afterCommit = () => {
+  if (c.req.destroyed || c.res.destroyed) return;
   c.res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   c.res.write('retry: 3000\n\n');
   const cl = { res: c.res, user: c.user };
   clients.add(cl);
   c.req.on('close', () => clients.delete(cl));
+  };
   return undefined;   // 保持連線
 }, 'user');
 
@@ -684,8 +736,10 @@ route('GET', '/auth/:provider', (c) => {
   if (!p.id || !p.secret) fail(400, `${p.label} 登入尚未設定（請設定環境變數，見 README）`);
   const state = crypto.randomBytes(16).toString('hex');
   const q = new URLSearchParams({ client_id: p.id, redirect_uri: `${BASE_URL}/auth/${c.params.provider}/callback`, scope: p.scope, state, response_type: 'code' });
-  c.res.writeHead(302, { Location: `${p.authUrl}?${q}`, 'Set-Cookie': cookie('oauth_state', state, 600) });
-  c.res.end();
+  c.afterCommit = () => {
+    c.res.writeHead(302, { Location: `${p.authUrl}?${q}`, 'Set-Cookie': cookie('oauth_state', state, 600) });
+    c.res.end();
+  };
 });
 
 route('GET', '/auth/:provider/callback', async (c) => {
@@ -709,8 +763,7 @@ route('GET', '/auth/:provider/callback', async (c) => {
     db.users.push(u);
   }
   startSession(c.res, u);
-  c.res.writeHead(302, { Location: '/' });
-  c.res.end();
+  c.afterCommit = () => { c.res.writeHead(302, { Location: '/' }); c.res.end(); };
 });
 
 // ───────────────────────── 靜態檔案 ─────────────────────────
@@ -754,11 +807,6 @@ const server = http.createServer(async (req, res) => {
     const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
     if (!r) return sendJson(res, 404, { error: '找不到這個頁面' });
 
-    const user = sessionUser(req);
-    if (r.auth && !user) fail(401, '請先登入');
-    if (r.auth === 'boss' && user.role !== 'boss') fail(403, '只有老闆可以使用這個功能');
-    if (r.auth === 'customer' && user.role !== 'customer') fail(403, '請使用顧客帳號');
-
     let body = {};
     if (req.method !== 'GET') {
       // 只接受 JSON，搭配 SameSite cookie 防止跨站偽造請求
@@ -770,13 +818,22 @@ const server = http.createServer(async (req, res) => {
     const params = {};
     const m = r.re.exec(url.pathname);
     r.keys.forEach((k, i) => { params[k] = m[i + 1]; });
-    const c = { req, res, params, query: url.searchParams, body, user, status: 200 };
-    const out = await r.handler(c);
+    let c;
+    const out = await withState(async () => {
+      const user = sessionUser(req);
+      if (r.auth && !user) fail(401, '請先登入');
+      if (r.auth === 'boss' && user.role !== 'boss') fail(403, '只有老闆可以使用這個功能');
+      if (r.auth === 'customer' && user.role !== 'customer') fail(403, '請使用顧客帳號');
+      c = { req, res, params, query: url.searchParams, body, user, status: 200 };
+      return r.handler(c);
+    });
+    if (c.afterCommit) c.afterCommit();
     if (out === undefined) return;              // 已自行回應（推播、轉址）
     sendJson(res, c.status, out);
   } catch (e) {
-    if (!(e instanceof HttpError)) console.error(e);
+    if (!(e instanceof HttpError)) console.error(databaseError(e));
     if (res.headersSent) return res.end();
+    res.removeHeader('Set-Cookie');
     const status = e instanceof HttpError ? e.status : 500;
     const msg = e instanceof HttpError ? e.message : '伺服器發生錯誤';
     if (url.pathname.startsWith('/auth/')) {
@@ -787,11 +844,38 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-load();
-expireOrders();
-server.listen(PORT, () => {
-  console.log(`北寧路早餐店系統已啟動`);
+let expiryTimer;
+let stopping = false;
+async function start() {
+  await storage.initialize();
+  await withState(() => { load(); expireOrders(); });
+  if (process.argv.includes('--migrate-only')) {
+    console.log('PostgreSQL 資料表及初始資料已就緒。');
+    await storage.close();
+    return;
+  }
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(PORT, resolve); });
+  expiryTimer = setInterval(() => withState(expireOrders).catch(e => console.error(databaseError(e))), 30000);
+  expiryTimer.unref();
+  console.log('北寧路早餐店系統已啟動（PostgreSQL）');
   console.log(`  顧客點餐： ${BASE_URL}/`);
   console.log(`  老闆後台： ${BASE_URL}/boss`);
-  console.log(`  示範帳號： 老闆 boss / ${process.env.BOSS_PASSWORD ? '(BOSS_PASSWORD)' : 'boss1234'}　顧客 demo / demo1234`);
+  if (process.send) process.send({ type: 'ready', port: server.address().port });
+  // 不輸出密碼或資料庫連線字串。
+}
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(expiryTimer);
+  for (const client of clients) client.res.end();
+  await new Promise(resolve => server.close(resolve));
+  await stateQueue;
+  await storage.close();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+start().catch(async error => {
+  console.error(databaseError(error));
+  await storage.close().catch(() => {});
+  process.exitCode = 1;
 });

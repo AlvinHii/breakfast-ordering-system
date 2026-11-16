@@ -1,0 +1,19 @@
+{
+  "name": "breakfast-shop",
+  "version": "2.1.0",
+  "private": true,
+  "description": "北寧路早餐店線上點餐與製作管理系統（PostgreSQL）",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "test:pooled": "node test/pooled.cjs",
+    "db:check": "node database/check.js",
+    "db:migrate": "node server.js --migrate-only"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}
