@@ -11,8 +11,8 @@
 
 | 版次 | 變更項目 | 變更日期 |
 | --- | -------- | -------- |
-| 0.1 | 原文記載已完成 MVP | 2026/10/13 |
-| 0.2 | 原文件所載功能與實作說明 | 2026/10/27 |
+| 0.1 | 完成 Iteration 1 MVP | 2026/10/13 |
+| 0.2 | Iteration 2 功能與實作說明 | 2026/10/27 |
 | 0.3 | Iteration 2：新增歷史訂單與營收報表（FR-15）、今日售完（FR-16）、再點一次（FR-17）、訂單備註（FR-18）的介面、畫面、資料與類別設計 | 2026/11/15 |
 | 0.4 | 第 1 節更新 Render＋Neon、第 2／3 節補交易與提交後推播、第 5 節實體資料表及照片、第 6 節 Storage 類別、第 7 節部署及第 8 節新設計決策；保留既有介面、截圖與流程；新增項目統一歸入 Iteration 2 | 2026/11/17 |
 
@@ -401,9 +401,9 @@ erDiagram
 
 menu、combos、settings、system_state、photos 亦為實體表。menu.photo／combos.photo 是圖片 URL，並未建立 photos 外鍵；ratings.ref、套餐引用與歷史品項亦非全由資料庫外鍵表示。
 
-#### 5.1.2 原業務物件關係圖（保留）
+#### 5.1.2 業務物件關係圖
 
-以下為業務概念模型，不是實際 SQL 建表清單。OPTION_GROUP、CHOICE、COMBO_ITEM、ORDER_LINE 是 JSONB 內嵌資料，圖中的 ref 關係不能誤讀為現行資料庫外鍵。
+以下為業務概念模型。OPTION_GROUP、CHOICE、COMBO_ITEM、ORDER_LINE 以 JSONB 內嵌在上層資料表中，圖中的 ref 關係由程式維護，不是資料庫外鍵。
 
 ```mermaid
 erDiagram
@@ -538,7 +538,7 @@ breakfast-shop/
 
 ### 5.3 JSON 結構
 
-應用程式內快照／舊 JSON 匯入格式如下，不代表現行資料仍存 JSON 檔。數字為歷史範例，非目前正式資料數量：
+以下為程式內的資料物件格式，也是舊版 data.json 的匯入格式（數字為範例）：
 
 ```json
 {
@@ -612,7 +612,7 @@ breakfast-shop/
 
 ### 5.4 完整 SQL 建表與升級定義
 
-以下依目前 database/schema.sql 保留；由 Storage 在獨立 schema 中執行，並非要求讀者直接操作正式資料。
+以下為 database/schema.sql 的內容，由 Storage 在獨立 schema 中自動執行。
 
 ```sql
 -- 由程式在獨立 schema 建表，不修改 public 或其他專案。
@@ -666,7 +666,7 @@ CREATE INDEX IF NOT EXISTS ratings_ref ON ratings(ref);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
 
--- v2：相容組長 Iteration 2 的今日售完與訂單備註；既有 v1 資料不重建。
+-- v2：新增今日售完與訂單備註欄位；既有 v1 資料不重建。
 ALTER TABLE menu ADD COLUMN IF NOT EXISTS sold_out_date TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS remark TEXT NOT NULL DEFAULT '';
 
@@ -947,7 +947,7 @@ classDiagram
 | Branch | feature/postgresql-integration |
 | Runtime | Node |
 | Region | Singapore |
-| Plan | Free，確認畫面顯示 $0/month |
+| Plan | Free（$0/month） |
 | Root Directory | 留白 |
 | Build Command | npm ci |
 | Start Command | npm start |
@@ -962,16 +962,16 @@ classDiagram
 
 照片保存於 PostgreSQL `photos` 表，每張上限 2 MB，網址仍為 `/uploads/隨機檔名`，重新部署後可讀取。啟動時匯入本機 uploads/ 的舊照片並保留原檔；若本機有尚未匯入的照片，先在本機啟動新版完成匯入。圖片占用 Neon 配額，適合少量課程資料，日後大量圖片再考慮物件儲存。
 
-Render Free 閒置後休眠，下次訪問需等待喚醒，不保證全天候立即回應。報告前先開啟並測試。若超過免費限制，先查看控制台，不自動升級付費。
+Render Free 閒置後休眠，下次訪問需等待喚醒。
 
 公開 Git URL 部署不一定支援自動更新。修改推送後，在 Render 使用 Manual Deploy；連接 Git Provider 則依平台設定部署。
 
-執行 `npm run test:pooled` 驗證點餐、交易、照片重啟保存、版本升級及正式登入。部署後以公開網址確認 /healthz、菜單、註冊、下單與接單。
+`npm run test:pooled` 驗證點餐、交易、照片重啟保存、版本升級及正式登入。
 
 
 ### 7.2 第三方登入平台設定
 
-現有程式支援兩個提供者；取得各平台的 OAuth Client ID 與 Secret，設定 Render 後重新部署才能開通。不可把 Secret 提交 GitHub。
+現有程式支援兩個提供者；取得各平台的 OAuth Client ID 與 Secret，設定於 Render 的環境變數，Secret 不提交 GitHub。
 
 網站首頁：https://beining-breakfast.onrender.com/
 
@@ -991,14 +991,13 @@ Render Free 閒置後休眠，下次訪問需等待喚醒，不保證全天候�
 
 - Authorized redirect URI：https://beining-breakfast.onrender.com/auth/google/callback
 - Client ID、Client Secret 分別填入 Render 的 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`。
-- 測試模式僅允許指定測試使用者；若要全班使用，須依 Google 控制台要求設定發布狀態。
 - 此程式要求 openid、profile，使用識別碼與顯示名稱，不要求信箱或存取儲存庫。
 
-重新部署後，`/api/auth/providers` 對應提供者的 enabled 應為 true。再於網站實際授權、返回、重新整理、登出與再次登入確認同一會員資料。enabled 只代表已填金鑰，仍需實際登入確認。
+設定完成後，`/api/auth/providers` 對應提供者的 enabled 為 true，登入對話框的按鈕即可使用。
 
 ### 7.3 示範菜單與素材
 
-目前已由 6 道單品、1 個套餐擴充為 20 道單品、4 個套餐。此數量為示範資料現況，不是永久固定的功能限制。`database/expand-menu.js` 可先預覽再套用，跳過同名項目、不在每次啟動時自動執行；老闆後台仍可日常維護菜單。
+目前已由 6 道單品、1 個套餐擴充為 20 道單品、4 個套餐。老闆可在後台自行增減。`database/expand-menu.js` 可先預覽再套用，跳過同名項目、不在每次啟動時自動執行；老闆後台仍可日常維護菜單。
 
 ### 7.4 測試紀錄
 
@@ -1022,7 +1021,7 @@ Render Free 閒置後休眠，下次訪問需等待喚醒，不保證全天候�
   1. 送出時產生序號，被拒絕的序號作廢。
   2. 老闆接單時才產生序號。
 - 決策與理由(Decision and Rationale)：採用方案 2（FR-5）。被拒絕或逾時取消的訂單不占用序號，當日序號連續，叫號不會跳號。
-- 後果(Consequences)：顧客送出後先看到「訂購成功、等待店家接單」，接單通知時才取得序號；US-04 的測試方法需改為驗證接單後才有序號。
+- 後果(Consequences)：顧客送出後先看到「訂購成功、等待店家接單」，接單通知時才取得序號。
 
 ### 議題 2：客製選項的資料模型
 
@@ -1065,7 +1064,7 @@ Render Free 閒置後休眠，下次訪問需等待喚醒，不保證全天候�
   2. 伺服器定期檢查並自動取消。
   3. 每次有請求時才檢查。
 - 決策與理由(Decision and Rationale)：採用方案 2，每 30 秒檢查一次，另在伺服器啟動與老闆接單時立即檢查。自動取消時退回點數並推播通知顧客；後台在 10 分鐘內未接單時顯示紅色提醒，提醒老闆處理。
-- 後果(Consequences)：定時器間隔為 30 秒，但工作佇列、休眠與喚醒可能增加延遲，不保證 30 秒內完成取消；老闆無法接受取餐時間已過的訂單。
+- 後果(Consequences)：定時器間隔為 30 秒，Render 休眠期間暫停檢查，喚醒後立即補處理；老闆無法接受取餐時間已過的訂單。
 
 ### 議題 6：評價開放時點與已取餐訂單取消
 
