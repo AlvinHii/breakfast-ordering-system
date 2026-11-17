@@ -1,17 +1,20 @@
 'use strict';
-// 北寧路早餐店系統 — 完整版（不含資料庫：資料存在 data.json）
-// 只用 Node.js 內建模組，不需要 npm install。第三方登入需要 Node 18 以上（使用內建 fetch）。
+// 北寧路早餐店系統 — PostgreSQL 版，需要 Node.js 24 以上。
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { databaseConfig, databaseError } = require('./config');
+const { Storage } = require('./storage');
 
-const PORT = Number(process.env.PORT) || 3000;
-const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const PORT = process.env.PORT === undefined ? 3000 : Number(process.env.PORT);
+const PRODUCTION = process.env.NODE_ENV === 'production';
+const BASE_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const ROOT = __dirname;
-const DATA_FILE = path.join(ROOT, 'data.json');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
+const DATA_FILE = path.resolve(process.env.LEGACY_DATA_FILE || path.join(ROOT, 'data.json'));
+const storage = new Storage(databaseConfig());
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(ROOT, 'uploads'));
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const MAX_BODY = 4 * 1024 * 1024;          // 4 MB（含 base64 照片）
 const MAX_PHOTO = 2 * 1024 * 1024;         // 照片解碼後最多 2 MB
@@ -61,12 +64,40 @@ function shopState() {
 
 // ───────────────────────── 資料存取 ─────────────────────────
 let db;
+let dirty = false;
+let pendingEvents = null;
+let stateQueue = Promise.resolve();
 const nextId = (k) => ++db.seq[k];
-// 先寫到暫存檔再改名：就算寫到一半當機，原本的 data.json 也不會壞掉
-function save() {
-  const tmp = DATA_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DATA_FILE);
+// 原路由只需標示變更；真正提交在整個請求成功後統一進行。
+function save() { dirty = true; }
+function withState(action) {
+  const task = stateQueue.then(async () => {
+    let previous;
+    dirty = false;
+    pendingEvents = [];
+    try {
+      const result = await storage.transaction(async client => {
+        db = await storage.load(client);
+        previous = structuredClone(db);
+        const value = await action(client);
+        if (dirty) await storage.save(client, db, previous);
+        return value;
+      });
+      // 資料提交成功後才推播，失敗時不會通知顧客「已成功」。
+      const events = pendingEvents;
+      pendingEvents = null;
+      for (const event of events) {
+        try { event(); } catch { console.error('已儲存資料，但有一則即時通知無法送出。'); }
+      }
+      return result;
+    } catch (error) {
+      db = previous;
+      pendingEvents = null;
+      throw error;
+    }
+  });
+  stateQueue = task.catch(() => {});
+  return task;
 }
 
 function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
@@ -90,7 +121,7 @@ function seed() {
     ...hashPassword(pw), createdAt: new Date().toISOString(),
   });
   addUser('boss', process.env.BOSS_PASSWORD || 'boss1234', '老闆', 'boss');
-  addUser('demo', 'demo1234', '示範同學', 'customer');
+  if (!PRODUCTION) addUser('demo', 'demo1234', '示範同學', 'customer');
 
   const addItem = (name, price, category, desc, groups = []) => db.menu.push({
     id: nextId('menu'), name, price, category, desc, groups, photo: '', available: true,
@@ -111,8 +142,28 @@ function seed() {
 }
 
 function load() {
-  if (fs.existsSync(DATA_FILE)) db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  else { seed(); save(); }
+  const firstRun = !db;
+  if (firstRun) {
+    if (fs.existsSync(DATA_FILE)) {
+      db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      console.log('正在匯入舊 data.json；原檔保留不變。');
+    } else seed();
+  }
+  // 舊檔的序號不可小於實際 ID，避免匯入後覆寫既有資料。
+  if (!db.seq) db.seq = {};
+  for (const [key, table] of Object.entries({ user: 'users', menu: 'menu', combo: 'combos', order: 'orders', rating: 'ratings' })) {
+    if (!Array.isArray(db[table])) throw new Error('舊資料缺少必要清單');
+    db.seq[key] = Math.max(Number(db.seq[key]) || 0, ...db[table].map(row => row.id));
+  }
+  if (!db.sessions) db.sessions = {};
+  if (PRODUCTION) {
+    // 僅替換已知公開預設密碼，既有自訂密碼不在每次部署時重設。
+    for (const user of db.users.filter(user => user.role === 'boss' && checkPassword(user, 'boss1234'))) {
+      Object.assign(user, hashPassword(process.env.BOSS_PASSWORD));
+      for (const [id, session] of Object.entries(db.sessions)) if (session.userId === user.id) delete db.sessions[id];
+      save();
+    }
+  }
   // 舊版資料：options（單一選項清單）自動轉成選項群組
   let migrated = false;
   for (const m of db.menu) {
@@ -123,7 +174,7 @@ function load() {
       migrated = true;
     }
   }
-  if (migrated) save();
+  if (firstRun || migrated) save();
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
@@ -142,14 +193,16 @@ function parseCookies(req) {
   return out;
 }
 function cookie(name, value, maxAgeSec) {
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`;
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${BASE_URL.startsWith('https://') ? '; Secure' : ''}`;
 }
+const disabledDemo = user => PRODUCTION && user && user.username === 'demo' && user.provider === 'local' && checkPassword(user, 'demo1234');
 function sessionUser(req) {
   const sid = parseCookies(req).sid;
   const s = sid && db.sessions[sid];
   if (!s) return null;
-  if (s.exp < Date.now()) { delete db.sessions[sid]; return null; }
-  return db.users.find((u) => u.id === s.userId) || null;
+  if (s.exp < Date.now()) { delete db.sessions[sid]; save(); return null; }
+  const user = db.users.find((u) => u.id === s.userId) || null;
+  return disabledDemo(user) ? null : user;
 }
 function startSession(res, user) {
   const sid = crypto.randomBytes(24).toString('hex');
@@ -179,12 +232,20 @@ const photoPath = (v) => {
 
 // ───────────────────────── 即時推播（Server-Sent Events） ─────────────────────────
 const clients = new Set();
-function push(cl, event, data) { cl.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
-function emitOrder(o) {
-  for (const cl of clients) if (cl.user.role === 'boss' || cl.user.id === o.userId) push(cl, 'order', o);
+function push(cl, event, data) {
+  if (!cl.res.destroyed && !cl.res.writableEnded) cl.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
-function emitUser(u) { for (const cl of clients) if (cl.user.id === u.id) push(cl, 'me', publicUser(u)); }
-function emitMenu() { for (const cl of clients) push(cl, 'menu', {}); }
+function publish(event, data, allowed) {
+  const snapshot = structuredClone(data);
+  const send = () => { for (const cl of clients) if (allowed(cl)) push(cl, event, snapshot); };
+  if (pendingEvents) pendingEvents.push(send); else send();
+}
+function emitOrder(o) {
+  const userId = o.userId;
+  publish('order', o, cl => cl.user.role === 'boss' || cl.user.id === userId);
+}
+function emitUser(u) { const id = u.id; publish('me', publicUser(u), cl => cl.user.id === id); }
+function emitMenu() { publish('menu', {}, () => true); }
 setInterval(() => { for (const cl of clients) cl.res.write(': ping\n\n'); }, 25000).unref();
 
 // ───────────────────────── 訂單邏輯 ─────────────────────────
@@ -237,7 +298,6 @@ function expireOrders() {
   }
   if (changed) save();
 }
-setInterval(expireOrders, 30 * 1000).unref();
 
 // 登入失敗太多次就暫時鎖住（防止有人一直猜密碼）
 const LOGIN_MAX = 5, LOGIN_WINDOW = 10 * 60 * 1000;
@@ -308,7 +368,7 @@ route('POST', '/api/login', (c) => {
   const key = loginKey(c.req, c.body.username);
   checkLoginLock(key);
   const u = db.users.find((x) => x.username.toLowerCase() === String(c.body.username || '').toLowerCase());
-  if (!u || !checkPassword(u, c.body.password)) { recordLoginFail(key); fail(401, '帳號或密碼錯誤'); }
+  if (!u || disabledDemo(u) || !checkPassword(u, c.body.password)) { recordLoginFail(key); fail(401, '帳號或密碼錯誤'); }
   loginFails.delete(key);
   startSession(c.res, u);
   return publicUser(u);
@@ -440,11 +500,14 @@ route('POST', '/api/orders/:id/rate', (c) => {
 
 // 即時推播
 route('GET', '/api/events', (c) => {
+  c.afterCommit = () => {
+  if (c.req.destroyed || c.res.destroyed) return;
   c.res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   c.res.write('retry: 3000\n\n');
   const cl = { res: c.res, user: c.user };
   clients.add(cl);
   c.req.on('close', () => clients.delete(cl));
+  };
   return undefined;   // 保持連線
 }, 'user');
 
@@ -503,13 +566,13 @@ route('POST', '/api/boss/orders/:id/cancel', (c) => {
 }, 'boss');
 
 // 老闆：照片上傳
-route('POST', '/api/boss/upload', (c) => {
+route('POST', '/api/boss/upload', async (c) => {
   const m = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec(String(c.body.dataUrl || ''));
   if (!m) fail(400, '只接受 PNG、JPG、WEBP、GIF 圖片');
   const buf = Buffer.from(m[2], 'base64');
-  if (buf.length > MAX_PHOTO) fail(400, '照片太大（上限 2 MB）');
+  if (!buf.length || buf.length > MAX_PHOTO) fail(400, '照片不可為空且上限為 2 MB');
   const name = `${crypto.randomBytes(12).toString('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
-  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  await storage.putPhoto(c.client, name, `image/${m[1]}`, buf);
   return { url: `/uploads/${name}` };
 }, 'boss');
 
@@ -684,8 +747,10 @@ route('GET', '/auth/:provider', (c) => {
   if (!p.id || !p.secret) fail(400, `${p.label} 登入尚未設定（請設定環境變數，見 README）`);
   const state = crypto.randomBytes(16).toString('hex');
   const q = new URLSearchParams({ client_id: p.id, redirect_uri: `${BASE_URL}/auth/${c.params.provider}/callback`, scope: p.scope, state, response_type: 'code' });
-  c.res.writeHead(302, { Location: `${p.authUrl}?${q}`, 'Set-Cookie': cookie('oauth_state', state, 600) });
-  c.res.end();
+  c.afterCommit = () => {
+    c.res.writeHead(302, { Location: `${p.authUrl}?${q}`, 'Set-Cookie': cookie('oauth_state', state, 600) });
+    c.res.end();
+  };
 });
 
 route('GET', '/auth/:provider/callback', async (c) => {
@@ -709,20 +774,27 @@ route('GET', '/auth/:provider/callback', async (c) => {
     db.users.push(u);
   }
   startSession(c.res, u);
-  c.res.writeHead(302, { Location: '/' });
-  c.res.end();
+  c.afterCommit = () => { c.res.writeHead(302, { Location: '/' }); c.res.end(); };
 });
 
 // ───────────────────────── 靜態檔案 ─────────────────────────
 const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 const PAGES = { '/': 'index.html', '/boss': 'boss.html', '/shop': 'boss.html', '/style.css': 'style.css', '/common.js': 'common.js' };
 
-function serveStatic(pathname, res) {
+async function serveStatic(pathname, res) {
   let file = null;
   if (PAGES[pathname]) file = path.join(PUBLIC_DIR, PAGES[pathname]);
   else {
     const m = /^\/uploads\/([a-f0-9]{24}\.(png|jpg|webp|gif))$/.exec(pathname);
-    if (m) file = path.join(UPLOAD_DIR, m[1]);
+    if (m) {
+      const photo = await storage.getPhoto(m[1]);
+      if (photo) {
+        res.writeHead(200, { 'Content-Type': photo.content_type, 'Content-Length': photo.data.length, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable' });
+        res.end(photo.data);
+        return true;
+      }
+      file = path.join(UPLOAD_DIR, m[1]);
+    }
   }
   if (!file || !fs.existsSync(file)) return false;
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' });
@@ -750,14 +822,13 @@ function sendJson(res, status, data) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (req.method === 'GET' && serveStatic(url.pathname, res)) return;
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      await storage.pool.query('SELECT 1');
+      return sendJson(res, 200, { status: 'ok' });
+    }
+    if (req.method === 'GET' && await serveStatic(url.pathname, res)) return;
     const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
     if (!r) return sendJson(res, 404, { error: '找不到這個頁面' });
-
-    const user = sessionUser(req);
-    if (r.auth && !user) fail(401, '請先登入');
-    if (r.auth === 'boss' && user.role !== 'boss') fail(403, '只有老闆可以使用這個功能');
-    if (r.auth === 'customer' && user.role !== 'customer') fail(403, '請使用顧客帳號');
 
     let body = {};
     if (req.method !== 'GET') {
@@ -770,13 +841,22 @@ const server = http.createServer(async (req, res) => {
     const params = {};
     const m = r.re.exec(url.pathname);
     r.keys.forEach((k, i) => { params[k] = m[i + 1]; });
-    const c = { req, res, params, query: url.searchParams, body, user, status: 200 };
-    const out = await r.handler(c);
+    let c;
+    const out = await withState(async client => {
+      const user = sessionUser(req);
+      if (r.auth && !user) fail(401, '請先登入');
+      if (r.auth === 'boss' && user.role !== 'boss') fail(403, '只有老闆可以使用這個功能');
+      if (r.auth === 'customer' && user.role !== 'customer') fail(403, '請使用顧客帳號');
+      c = { req, res, params, query: url.searchParams, body, user, client, status: 200 };
+      return r.handler(c);
+    });
+    if (c.afterCommit) c.afterCommit();
     if (out === undefined) return;              // 已自行回應（推播、轉址）
     sendJson(res, c.status, out);
   } catch (e) {
-    if (!(e instanceof HttpError)) console.error(e);
+    if (!(e instanceof HttpError)) console.error(databaseError(e));
     if (res.headersSent) return res.end();
+    res.removeHeader('Set-Cookie');
     const status = e instanceof HttpError ? e.status : 500;
     const msg = e instanceof HttpError ? e.message : '伺服器發生錯誤';
     if (url.pathname.startsWith('/auth/')) {
@@ -787,11 +867,53 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-load();
-expireOrders();
-server.listen(PORT, () => {
-  console.log(`北寧路早餐店系統已啟動`);
+let expiryTimer;
+let stopping = false;
+async function start() {
+  if (PRODUCTION && (!process.env.BOSS_PASSWORD || process.env.BOSS_PASSWORD.length < 12 || process.env.BOSS_PASSWORD === 'boss1234')) {
+    console.error('正式環境請設定至少 12 字元的 BOSS_PASSWORD。');
+    await storage.close();
+    process.exitCode = 1;
+    return;
+  }
+  await storage.initialize();
+  await withState(async client => {
+    load();
+    // 將本機舊照片匯入，保留檔名及原檔；只在有本機檔案時執行。
+    for (const name of fs.readdirSync(UPLOAD_DIR)) {
+      if (!/^[a-f0-9]{24}\.(png|jpg|webp|gif)$/.test(name)) continue;
+      const data = fs.readFileSync(path.join(UPLOAD_DIR, name));
+      await storage.putPhoto(client, name, TYPES[path.extname(name)], data);
+    }
+    expireOrders();
+  });
+  if (process.argv.includes('--migrate-only')) {
+    console.log('PostgreSQL 資料表及初始資料已就緒。');
+    await storage.close();
+    return;
+  }
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(PORT, resolve); });
+  expiryTimer = setInterval(() => withState(expireOrders).catch(e => console.error(databaseError(e))), 30000);
+  expiryTimer.unref();
+  console.log('北寧路早餐店系統已啟動（PostgreSQL）');
   console.log(`  顧客點餐： ${BASE_URL}/`);
   console.log(`  老闆後台： ${BASE_URL}/boss`);
-  console.log(`  示範帳號： 老闆 boss / ${process.env.BOSS_PASSWORD ? '(BOSS_PASSWORD)' : 'boss1234'}　顧客 demo / demo1234`);
+  if (process.send) process.send({ type: 'ready', port: server.address().port });
+  // 不輸出密碼或資料庫連線字串。
+}
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(expiryTimer);
+  for (const client of clients) client.res.end();
+  await new Promise(resolve => server.close(resolve));
+  await stateQueue;
+  await storage.close();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+start().catch(async error => {
+  console.error(databaseError(error));
+  await storage.close().catch(() => {});
+  process.exitCode = 1;
 });

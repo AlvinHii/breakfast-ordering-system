@@ -1,5 +1,7 @@
 # 軟體設計文件(SDD)
 
+> 2026/11/16 PostgreSQL 整合更新：本分支已將執行資料儲存改為 PostgreSQL，保留 Iteration 3 功能。以下 JSON 檔案架構與類別圖為先前設計基線；目前資料表、Storage 類別、交易、v1→v2 升級及部署限制以 [DATABASE.md](../DATABASE.md) 與 [schema.sql](../database/schema.sql) 為準。照片仍使用 uploads/；執行需要 Node.js 24、npm ci 及 DATABASE_URL。
+
 - 專案名稱：北寧路早餐店 線上點餐與製作管理系統
 - 撰寫日期：2026/10/26
 - 發展者：〔請填入所有組員姓名〕

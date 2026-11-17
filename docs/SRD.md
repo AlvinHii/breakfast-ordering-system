@@ -1,5 +1,7 @@
 # 專案需求規格文件 (Software Requirements Specification)
 
+> 2026/11/16 PostgreSQL 整合更新：本分支已實作雲端 PostgreSQL 持久化，不再將資料庫列為未完成項目。以下 Iteration 1/2 的 JSON 儲存敘述保留為歷史基線；目前實作及驗證以 [DATABASE.md](../DATABASE.md) 為準。公開網站部署、照片雲端化及大量使用者負載驗證仍未完成。
+
 ## 專案資訊
 
 > **專案名稱**：北寧路早餐店 線上點餐與製作管理系統  

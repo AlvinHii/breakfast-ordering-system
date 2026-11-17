@@ -1,12 +1,16 @@
-# 北寧路早餐店系統（完整版，不含資料庫）
+# 北寧路早餐店系統（PostgreSQL 版）
 
-只用 Node.js 內建模組，**不需要 `npm install`**。資料存在 `data.json`，上傳的照片存在 `uploads/`。
+需要 **Node.js 24 以上**。資料與上傳照片存於 PostgreSQL（支援 Neon），使用 `pg` 連線套件。本版整合資料庫並保留歷史報表、今日售完、再點一次與訂單備註。免費公開展示部署見 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ## 執行（Windows PowerShell）
 
 ```powershell
 cd 你放這個資料夾的位置
-node server.js
+npm ci
+# 尚未建立 .env 時，複製 .env.example 成 .env，填入完整 DATABASE_URL。
+npm run db:check
+npm run db:migrate
+npm start
 ```
 
 | 頁面 | 網址 | 示範帳號 |
@@ -14,7 +18,9 @@ node server.js
 | 顧客點餐 | http://localhost:3000/ | demo / demo1234（也可自己註冊） |
 | 老闆後台 | http://localhost:3000/boss | boss / boss1234 |
 
-- 第一次啟動時，系統會自動建立 `data.json`，並放入示範菜單與帳號。想清空重來，就停掉伺服器、刪掉 `data.json` 再啟動。
+- 首次啟動在 PostgreSQL 建立獨立的 `breakfast_shop` schema：有本機 `data.json` 就匯入並保留原檔，沒有才建立示範資料。已初始化不重複匯入，刪除 JSON 不會清空資料庫。
+- `.env` 僅供本機使用，不提交 GitHub。組員可從範本建立自己的設定；部署時在主機設定環境變數。請勿將含密碼的網址貼入原始碼、HackMD 或 commit。
+- v1 PostgreSQL 會自動升級至 v2，新增售完日期及訂單備註欄位，保留舊帳號、點數與訂單。詳見 [DATABASE.md](DATABASE.md)。
 - 換埠號：`$env:PORT="3001"; node server.js`
 - 改老闆密碼（第一次啟動前設定）：`$env:BOSS_PASSWORD="你的密碼"; node server.js`
 - 為了方便測試，預設營業時間是 06:00–21:00，可以在後台「設定」改成實際時間。
@@ -96,7 +102,7 @@ $env:GOOGLE_CLIENT_ID="..."; $env:GOOGLE_CLIENT_SECRET="..."
 node server.js
 ```
 
-需要 Node.js 18 以上。如果不是在 localhost，請另外設定 `$env:BASE_URL="https://你的網址"`。
+本版需要 Node.js 24 以上。如果不是在 localhost，請另外設定 `$env:BASE_URL="https://你的網址"`。
 
 ## 安全措施
 
@@ -106,7 +112,7 @@ node server.js
 - 照片只接受 PNG、JPG、WEBP、GIF，上限 2 MB，檔名隨機產生，前端會先縮圖。
 - 輸出到畫面的文字都會做 HTML 跳脫。
 - 同一台裝置對同一個帳號在 10 分鐘內登入失敗 5 次，會暫時鎖住 10 分鐘，防止有人一直猜密碼。
-- 儲存資料時先寫到 `data.json.tmp` 再改名，就算寫到一半當機，原本的 `data.json` 也不會壞掉。
+- PostgreSQL 交易會同時提交訂單與點數，失敗時回滾；即時通知在提交成功後才發送。雲端連線驗證 TLS 憑證。
 
 ## API
 
@@ -130,6 +136,9 @@ node server.js
 | GET | /api/boss/history?from=YYYY-MM-DD&to=YYYY-MM-DD | 老闆 | 歷史訂單與營收報表（區間最多 366 天，明細最多 500 筆） |
 | POST | /api/boss/menu/:id/soldout | 老闆 | 標記或取消今日售完 `{soldOut: true/false}` |
 
-## 尚未做（依指示）
+## 驗證與部署範圍
 
-正式資料庫：`data.json` 適合展示，不適合多台伺服器或大量資料。
+- `npm test`：使用隔離的 PostgreSQL 測試 schema，測完自動清除測試資料。
+- `npm run test:pooled`：使用 Neon 對應的池化網址重跑相同測試，不改寫 `.env`。
+- 照片已改存 PostgreSQL，不需要付費磁碟；`render.yaml` 提供免費 Web Service 設定。SSE 通知先以一個 Node.js 服務提供，免費方案休眠期間不會持續處理訂單。
+- 此版保留原路由的資料快照結構並只更新變動資料列；尚未完成大量訂單的分頁 SQL 及跨服務事件通知。
