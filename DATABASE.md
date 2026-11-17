@@ -8,7 +8,7 @@
 
 預設使用獨立的 `breakfast_shop` schema，不會修改 `public` 或其他專案。可透過 `DB_SCHEMA` 指定其他 schema，僅接受小寫英文字母開頭及英數底線，最長 63 字元。
 
-本分支以組長最新 main 為基底，保留 Iteration 3 的歷史報表、今日售完、再點一次、備註與前端樣式。資料庫版本為 v2：在 v1 表上追加 `menu.sold_out_date` 及 `orders.remark`，不刪除原表或重設帳號、訂單、點數。舊 JSON 沒有備註時預設空字串；售完日期以台北日期判斷，隔日自動恢復。
+本分支以組長最新 main 為基底，保留 Iteration 2 的歷史報表、今日售完、再點一次、備註與前端樣式。資料庫版本為 v2：在 v1 表上追加 `menu.sold_out_date` 及 `orders.remark`，不刪除原表或重設帳號、訂單、點數。舊 JSON 沒有備註時預設空字串；售完日期以台北日期判斷，隔日自動恢復。
 
 ## 資料表
 

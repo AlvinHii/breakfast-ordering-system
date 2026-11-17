@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS ratings_ref ON ratings(ref);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
 
--- v2：相容組長 Iteration 3 的今日售完與訂單備註；既有 v1 資料不重建。
+-- v2：相容組長 Iteration 2 的今日售完與訂單備註；既有 v1 資料不重建。
 ALTER TABLE menu ADD COLUMN IF NOT EXISTS sold_out_date TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS remark TEXT NOT NULL DEFAULT '';
 
