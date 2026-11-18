@@ -1,6 +1,6 @@
 # 北寧路早餐店系統（PostgreSQL 版）
 
-需要 **Node.js 24 以上**。資料與上傳照片存於 PostgreSQL（支援 Neon），使用 `pg` 連線套件。本版整合資料庫並保留歷史報表、今日售完、再點一次與訂單備註。免費公開展示部署見 [DEPLOYMENT.md](DEPLOYMENT.md)。
+需要 **Node.js 24 以上**。資料與上傳照片存於 PostgreSQL（支援 Neon），使用 `pg` 連線套件。本版整合資料庫並保留歷史報表、今日售完、再點一次與訂單備註。免費公開展示部署見 [DEPLOYMENT.md](DEPLOYMENT.md)。 
 
 ## 執行（Windows PowerShell）
 
